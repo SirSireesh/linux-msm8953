@@ -37,6 +37,15 @@ config QCOM_CLK_APCS_MSM8916
 	  Say Y if you want to support CPU frequency scaling on devices
 	  such as msm8916.
 
+config QCOM_CLK_APCS_MSM8953
+	tristate "MSM8953 APCS Clock Controller"
+	help
+	  Support for the APCS Clock Controller on msm8953 devices. The
+	  APCS is managing high frequency PLL and mux and divider clocks
+	  which feeds the CPUs.
+	  Say Y if you want to support CPU frequency scaling on devices
+	  such as msm8953.
+
 config QCOM_CLK_RPM
 	tristate "RPM based Clock Controller"
 	depends on MFD_QCOM_RPM
