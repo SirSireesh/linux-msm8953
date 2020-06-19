@@ -1238,6 +1238,7 @@ static const struct qcom_reset_map gcc_msm8953_resets[] = {
 	[GCC_USB3PHY_PHY_BCR]	= { 0x3F03C },
 	[GCC_USB_30_BCR]	= { 0x3F070 },
 	[GCC_CAMSS_MICRO_BCR]	= { 0x56008 },
+	[GCC_MSS_RESTART]	= { 0x71000 },
 };
 
 static const struct regmap_config gcc_msm8953_regmap_config = {

@@ -331,6 +331,7 @@
 #define GCC_USB3PHY_PHY_BCR			2
 #define GCC_USB_30_BCR				3
 #define GCC_CAMSS_MICRO_BCR			4
+#define GCC_MSS_RESTART				5
 
 /* GDSCs */
 #define USB30_GDSC				0
