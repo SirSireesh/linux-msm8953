@@ -5,6 +5,9 @@
 #include <dt-bindings/clock/qcom,gcc-msm8953.h>
 #include <dt-bindings/clock/qcom,rpmcc.h>
 #include <dt-bindings/power/qcom-rpmpd.h>
+#include <dt-bindings/soc/qcom,apr.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
 
 / {
 	interrupt-parent = <&intc>;
@@ -1130,7 +1133,103 @@
 				qcom,remote-pid = <1>;
 
 				label = "modem";
+
+				apr: apr {
+					compatible = "qcom,apr-v2";
+					qcom,smd-channels = "apr_audio_svc";
+					qcom,apr-domains = <APR_DOMAIN_ADSP>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					apr-service@3 {
+						reg = <APR_SVC_ADSP_CORE>;
+						compatible = "qcom,q6core";
+					};
+
+					q6afe: apr-service@4 {
+						compatible = "qcom,q6afe";
+						reg = <APR_SVC_AFE>;
+						q6afedai: dais {
+							compatible = "qcom,q6afe-dais";
+							#address-cells = <1>;
+							#size-cells = <0>;
+							#sound-dai-cells = <1>;
+
+							dai@16 {
+								reg = <PRIMARY_MI2S_RX>;
+								qcom,sd-lines = <0 1>;
+							};
+
+							dai@20 {
+								reg = <TERTIARY_MI2S_TX>;
+								qcom,sd-lines = <0 1>;
+							};
+						};
+					};
+
+					q6asm: apr-service@7 {
+						compatible = "qcom,q6asm";
+						reg = <APR_SVC_ASM>;
+						q6asmdai: dais {
+							compatible = "qcom,q6asm-dais";
+							#address-cells = <1>;
+							#size-cells = <0>;
+							#sound-dai-cells = <1>;
+
+							dai@0 {
+								reg = <0>;
+								direction = <2>;
+							};
+							dai@1 {
+								reg = <1>;
+								direction = <1>;
+							};
+							dai@2 {
+								reg = <2>;
+								direction = <2>;
+							};
+							dai@3 {
+								reg = <3>;
+								direction = <1>;
+								is-compress-dai;
+							};
+						};
+					};
+
+					q6adm: apr-service@8 {
+						compatible = "qcom,q6adm";
+						reg = <APR_SVC_ADM>;
+						q6routing: routing {
+							compatible = "qcom,q6adm-routing";
+							#sound-dai-cells = <0>;
+						};
+					};
+
+					q6mvm: apr-service@9 {
+						compatible = "qcom,q6mvm";
+						reg = <APR_SVC_ADSP_MVM>;
+						status = "disabled";
+
+						q6voicedai: dais {
+							compatible = "qcom,q6voice-dais";
+							#sound-dai-cells = <0>;
+						};
+					};
+
+					q6cvs: apr-service@a {
+						compatible = "qcom,q6cvs";
+						reg = <APR_SVC_ADSP_CVS>;
+						status = "disabled";
+					};
+
+					q6cvp: apr-service@b {
+						compatible = "qcom,q6cvp";
+						reg = <APR_SVC_ADSP_CVP>;
+						status = "disabled";
+				       };
+				};
 			};
+
 		};
 
 		lpass: adsp@c200000 {
