@@ -336,10 +336,11 @@
 /* GDSCs */
 #define USB30_GDSC				0
 #define VENUS_GDSC				1
-#define MDSS_GDSC				2
-#define JPEG_GDSC				3
-#define VFE_GDSC				4
-#define OXILI_GX_GDSC				5
-#define OXILI_CX_GDSC				6
+#define VENUS_CORE0_GDSC			2
+#define MDSS_GDSC				3
+#define JPEG_GDSC				4
+#define VFE_GDSC				5
+#define OXILI_GX_GDSC				6
+#define OXILI_CX_GDSC				7
 
 #endif /* _DT_BINDINGS_CLK_MSM_GCC_8953_H */

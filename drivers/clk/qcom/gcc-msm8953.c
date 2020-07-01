@@ -980,6 +980,14 @@ static struct gdsc venus_gdsc = {
 	.pwrsts = PWRSTS_OFF_ON,
 };
 
+static struct gdsc venus_core0_gdsc = {
+	.gdscr = 0x4c028,
+	.pd = {
+		.name = "venus_core0",
+	},
+	.pwrsts = PWRSTS_OFF_ON,
+};
+
 static struct gdsc mdss_gdsc = {
 	.gdscr = 0x4d078,
 	.pd = {
@@ -1256,6 +1264,7 @@ static const struct regmap_config gcc_msm8953_regmap_config = {
 static struct gdsc *gcc_msm8953_gdscs[] = {
 	[USB30_GDSC] = &usb30_gdsc,
 	[VENUS_GDSC] = &venus_gdsc,
+	[VENUS_CORE0_GDSC] = &venus_core0_gdsc,
 	[MDSS_GDSC] = &mdss_gdsc,
 	[JPEG_GDSC] = &jpeg_gdsc,
 	[VFE_GDSC] = &vfe_gdsc,
