@@ -439,13 +439,12 @@ static const struct venus_resources msm8996_res = {
 };
 
 static const struct freq_tbl msm8953_freq_table[] = {
-	{ 979200, 520000000 },	/* 4k UHD @ 30 */
-	{ 864000, 520000000 },	/* 720p @ 240 */
-	{ 489600, 346666667 },	/* 1080p @ 60 */
-	{ 432000, 346666667 },	/* 720p @ 120 */
-	{ 244800, 150000000 },	/* 1080p @ 30 */
-	{ 216000, 150000000 },	/* 720p @ 60 */
-	{ 108000,  75000000 },	/* 720p @ 30 */
+	{ 979200, 465000000 },	/* 4k UHD @ 30 */
+	{ 864000, 400000000 },	/* 720p @ 240 */
+	{ 489600, 360000000 },	/* 1080p @ 60 */
+	{ 432000, 310000000 },	/* 720p @ 120 */
+	{ 244800, 228570000 },	/* 1080p @ 30 */
+	{ 108000, 114290000 },	/* 720p @ 30 */
 };
 
 static const struct reg_val msm8953_reg_preset[] = {
@@ -459,14 +458,12 @@ static const struct venus_resources msm8953_res = {
 	.freq_tbl_size = ARRAY_SIZE(msm8953_freq_table),
 	.reg_tbl = msm8953_reg_preset,
 	.reg_tbl_size = ARRAY_SIZE(msm8953_reg_preset),
-	.clks = {"core", "iface", "bus" },
+	.clks = { "core", "iface", "bus" },
 	.clks_num = 3,
 	.vcodec0_clks = { "core" },
 	.vcodec1_clks = { "core" },
 	.vcodec_clks_num = 1,
-	.vcodec_pmdomains = { "gdsc_venus" },
-	.vcodec_pmdomains_num = 1,
-	.max_load = 1044480,
+	.max_load = 1044480, /* 4096 x 2176 @ 30 fps */
 	.hfi_version = HFI_VERSION_3XX,
 	.vmem_id = VIDC_RESOURCE_NONE,
 	.vmem_size = 0,
