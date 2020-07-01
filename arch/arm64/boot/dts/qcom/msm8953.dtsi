@@ -546,7 +546,7 @@
 
 			//venus_ns
 			iommu-ctx@16000 {
-				compatible = "qcom,msm-iommu-v1-ns";
+				compatible = "qcom,msm-iommu-v1-sec";
 				reg = <0x16000 0x1000>;
 				interrupts = <GIC_SPI 113 IRQ_TYPE_LEVEL_HIGH>;
 			};
@@ -1221,6 +1221,7 @@
 
 			video-decoder {
 				compatible = "venus-decoder";
+				power-domains = <&gcc VENUS_CORE0_GDSC>;
 				clocks = <&gcc GCC_VENUS0_VCODEC0_CLK>;
 				clock-names = "core";
 			};
