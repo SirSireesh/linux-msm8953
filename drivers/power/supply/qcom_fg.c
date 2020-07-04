@@ -1196,6 +1196,7 @@ struct fg_chip {
 	int soc_irq[FG_SOC_IRQ_COUNT];
 	int batt_irq[FG_SOC_IRQ_COUNT];
 	int mem_irq[FG_SOC_IRQ_COUNT];
+	bool irqs_enabled;
 
 	bool full_soc_irq_enabled;
 	bool vbat_low_irq_enabled;
@@ -1648,6 +1649,48 @@ static int fg_reset(struct fg_chip *chip, bool reset)
 static int fg_set_sram_param(struct fg_chip *chip, enum fg_sram_param_id id,
 		u8 *val);
 
+static void fg_enable_irqs(struct fg_chip *chip, bool enable)
+{
+	if (!(enable ^ chip->irqs_enabled))
+		return;
+
+	if (enable) {
+		enable_irq(chip->soc_irq[DELTA_SOC]);
+		enable_irq_wake(chip->soc_irq[DELTA_SOC]);
+		if (!chip->full_soc_irq_enabled) {
+			enable_irq(chip->soc_irq[FULL_SOC]);
+			enable_irq_wake(chip->soc_irq[FULL_SOC]);
+			chip->full_soc_irq_enabled = true;
+		}
+		enable_irq(chip->batt_irq[BATT_MISSING]);
+		if (!chip->vbat_low_irq_enabled) {
+			enable_irq(chip->batt_irq[VBATT_LOW]);
+			enable_irq_wake(chip->batt_irq[VBATT_LOW]);
+			chip->vbat_low_irq_enabled = true;
+		}
+		enable_irq(chip->soc_irq[EMPTY_SOC]);
+		enable_irq_wake(chip->soc_irq[EMPTY_SOC]);
+		chip->irqs_enabled = true;
+	} else {
+		disable_irq_wake(chip->soc_irq[DELTA_SOC]);
+		disable_irq_nosync(chip->soc_irq[DELTA_SOC]);
+		if (chip->full_soc_irq_enabled) {
+			disable_irq_wake(chip->soc_irq[FULL_SOC]);
+			disable_irq_nosync(chip->soc_irq[FULL_SOC]);
+			chip->full_soc_irq_enabled = false;
+		}
+		disable_irq(chip->batt_irq[BATT_MISSING]);
+		if (chip->vbat_low_irq_enabled) {
+			disable_irq_wake(chip->batt_irq[VBATT_LOW]);
+			disable_irq_nosync(chip->batt_irq[VBATT_LOW]);
+			chip->vbat_low_irq_enabled = false;
+		}
+		disable_irq_wake(chip->soc_irq[EMPTY_SOC]);
+		disable_irq_nosync(chip->soc_irq[EMPTY_SOC]);
+		chip->irqs_enabled = false;
+	}
+}
+
 #define EN_WR_FGXCT_PRD		BIT(6)
 #define EN_RD_FGXCT_PRD		BIT(5)
 #define FG_RESTART_TIMEOUT_MS	12000
@@ -1655,8 +1698,7 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 {
 	int rc;
 	u8 buf[4] = {0, 0, 0, 0};
-	//TODO:
-	//fg_disable_irqs(chip);
+	fg_enable_irqs(chip, false);
 
 	/* Acquire IMA access forcibly from FG ALG */
 	rc = fg_masked_write(chip, chip->mem_base + MEM_INTF_IMA_CFG,
@@ -1699,8 +1741,7 @@ out:
 	if (rc < 0)
 		dev_err(chip->dev, "Error in clearing VACT_INT_ERR, rc=%d\n",
 				rc);
-	//TODO:
-	//fg_enable_irqs(chip);
+	fg_enable_irqs(chip, true);
 	return rc;
 }
 
