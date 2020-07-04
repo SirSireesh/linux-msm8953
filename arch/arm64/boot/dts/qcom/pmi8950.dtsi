@@ -121,12 +121,26 @@
 
 		qcom_smbcharger {
 			compatible = "qcom,pmi8950-charger";
-			status = "disabled";
-		};
-
-		charger@1000 {
 			reg = <0x1000>;
-			//FIXME: Add interrupts
+			status = "okay";
+
+			interrupts = <0x0 0x10 7 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x10 5 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x10 4 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x12 1 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x12 0 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x13 2 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x13 1 IRQ_TYPE_EDGE_BOTH>,
+				     <0x0 0x14 1 IRQ_TYPE_EDGE_BOTH>;
+			interrupt-names = "chg-done",
+					  "chg-fast",
+					  "chg-trkl",
+					  "bat-temp-ok",
+					  "bat-present",
+					  "chg-gone",
+					  "usb-valid",
+					  "dc-valid";
+			chg_otg: otg-vbus { };
 		};
 
 		otg@1100 {
@@ -233,7 +247,7 @@
 		backlight: wled@d800 {
 			#address-cells = <1>;
 			#size-cells = <0>;
-			status = "disabled"; // FIXME Is this wled stuff even needed?
+			status = "okay"; // FIXME Is this wled stuff even needed?
 			compatible = "qcom,pmi8998-wled";
 			reg = <0xd800 0xd900>;
 
