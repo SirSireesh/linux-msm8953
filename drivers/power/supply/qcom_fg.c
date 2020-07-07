@@ -99,32 +99,20 @@ enum fg_sram_param_id {
 	FG_DATA_OCV,
 	FG_DATA_VOLTAGE,
 	FG_DATA_CURRENT,
-	FG_DATA_BATT_ESR,
-	FG_DATA_BATT_ESR_COUNT,
-	FG_DATA_BATT_ESR_REG,
 	FG_DATA_BATT_SOC,
+	FG_DATA_BATT_ESR,
+	FG_DATA_BATT_ESR_REG,
 	FG_DATA_FULL_SOC,
 	FG_DATA_CYCLE_COUNT,
 	FG_DATA_VINT_ERR,
 	FG_DATA_CPRED_VOLTAGE,
 	FG_DATA_CHARGE_COUNTER,
-	FG_DATA_BATT_ID,
-	FG_DATA_BATT_ID_INFO,
 	FG_DATA_NOM_CAP,
-	FG_DATA_ACT_CAP,
 	FG_PARAM_ACTUAL_CAP,
 	FG_PARAM_ACTUAL_CHARGE,
-	FG_PARAM_MAH_TO_SOC_CONV,
-
-	FG_BATT_PROFILE,
-	FG_BATT_PROFILE_INTEGRITY,
-	FG_SETTING_ADC_CONF,
 	FG_SETTING_RSLOW_CHG,
 	FG_SETTING_RSLOW_DISCHG,
-	FG_SETTING_ALG,
-	FG_SETTING_EXTERNAL_SENSE,
 	FG_SETTING_THERMAL_COEFFS,
-
 	//Settings below this have corresponding dt entries
 	FG_SETTING_TERM_CURRENT,
 	FG_SETTING_SYS_TERM_CURRENT,
@@ -198,121 +186,89 @@ static void fg_encode_default(struct fg_sram_param sp, int val, u8 *buf);
 #define PMI8950_LSB_16B_DENMTR	152587
 #define PMI8950_FULL_PERCENT_3B	0xffffff
 #define MICRO_UNIT		1000000ULL
+
+#define FG_SRAM_PARAM_DEF(_name, of_name, addr, off, len, num, den, val_off,\
+		enc, dec, val) \
+	[FG_##_name] = { \
+		.name		= of_name,\
+		.address	= addr,\
+		.offset		= off,\
+		.length		= len,\
+		.numrtr		= num,\
+		.denmtr		= den,\
+		.encode		= enc,\
+		.decode		= dec,\
+		.val_offset	= val_off,\
+		.value		= val,\
+	}
+
 static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
-	[FG_DATA_BATT_TEMP] = {
-		.address	= 0x550,
-		.offset		= 2,
-		.length		= 2,
-		.numrtr		= 1000,
-		.denmtr		= 625,
-		.val_offset	= -2730,
-		.decode		= fg_decode_value_16b,
-	},
-	[FG_DATA_CHARGE] = {
-		.address	= 0x570,
-		.offset		= 0,
-		.length		= 4,
-		.numrtr		= PMI8950_FULL_PERCENT_3B,
-		.denmtr		= 10000,
-		.decode		= fg_decode_current,
-	},
-	[FG_DATA_OCV] = {
-		.address	= 0x588,
-		.offset		= 3,
-		.length		= 2,
-		.numrtr		= PMI8950_LSB_16B_NUMRTR,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.decode		= fg_decode_value_16b,
-	},
-	[FG_DATA_VOLTAGE] = {
-		.address	= 0x5cc,
-		.offset		= 1,
-		.length		= 2,
-		.numrtr		= PMI8950_LSB_16B_NUMRTR,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.decode		= fg_decode_value_16b,
-	},
-	[FG_DATA_CPRED_VOLTAGE] = {
-		.address	= 0x540,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= PMI8950_LSB_16B_NUMRTR,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.decode		= fg_decode_value_16b,
-	},
-	[FG_DATA_CURRENT] = {
-		.address	= 0x5cc,
-		.offset		= 3,
-		.length		= 2,
-		.numrtr		= PMI8950_LSB_16B_NUMRTR,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.decode		= fg_decode_current,
-	},
-	[FG_DATA_BATT_ESR] = {
-		.address	= 0x544,
-		.offset		= 2,
-		.length		= 2,
-		.decode		= fg_decode_float,
-	},
-	[FG_DATA_BATT_ESR_COUNT] = {
-		.address	= 0x558,
-		.offset		= 2,
-		.length		= 2,
-		.decode		= fg_decode_default,
-	},
-	[FG_DATA_BATT_ESR_REG] = {
-		.address	= 0x4f4,
-		.offset		= 2,
-		.length		= 2,
-		.decode		= fg_decode_float,
-	},
-	[FG_DATA_BATT_SOC] = {
-		.address	= 0x56c,
-		.offset		= 1,
-		.length		= 3,
-		.numrtr		= PMI8950_FULL_PERCENT_3B,
-		.denmtr		= 10000,
-		.decode		= fg_decode_value_16b,
-	},
-	[FG_DATA_NOM_CAP] = {
-		.address	= 0x4f4,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= 1000,
-		.decode		= fg_decode_value_le,
-	},
-	[FG_DATA_ACT_CAP] = {
-		.address	= 0x5e4,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= 1000,
-		.decode		= fg_decode_default,
-	},
-	[FG_PARAM_ACTUAL_CAP] = {
-		.address	= 0x578,
-		.offset		= 2,
-		.length		= 2,
-		.encode		= fg_encode_default,
-	},
-	[FG_PARAM_ACTUAL_CHARGE] = {
-		.address	= 0x578,
-		.offset		= 0,
-		.length		= 2,
-		.encode		= fg_encode_float,
-	},
-	[FG_PARAM_MAH_TO_SOC_CONV] = {
-		.address	= 0x4a0,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= MICRO_UNIT,
-		.decode		= fg_decode_value_le,
-	},
-	[FG_DATA_CYCLE_COUNT] = {
-		.address	= 0x5e8,
-		.offset		= 0,
-		.length		= 2,
-		.decode		= fg_decode_value_le
-	},
+	FG_SRAM_PARAM_DEF(DATA_BATT_TEMP, NULL, 0x550, 2, 2, 1000, 625, -2730, NULL,
+			fg_decode_value_16b, 0),
+	FG_SRAM_PARAM_DEF(DATA_CHARGE, NULL, 0x570, 0, 4, PMI8950_FULL_PERCENT_3B,
+			10000, 0, NULL, fg_decode_current, 0),
+	FG_SRAM_PARAM_DEF(DATA_OCV, NULL, 0x588, 3, 2, PMI8950_LSB_16B_NUMRTR,
+			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b, 0),
+	FG_SRAM_PARAM_DEF(DATA_VOLTAGE, NULL, 0x5cc, 1, 2, PMI8950_LSB_16B_NUMRTR,
+			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b, 0),
+	FG_SRAM_PARAM_DEF(DATA_CPRED_VOLTAGE, NULL, 0x540, 0, 2,
+			PMI8950_LSB_16B_NUMRTR, PMI8950_LSB_16B_DENMTR, 0, NULL,
+			fg_decode_value_16b, 0),
+	FG_SRAM_PARAM_DEF(DATA_CURRENT, NULL, 0x5cc, 3, 2, PMI8950_LSB_16B_NUMRTR,
+			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_current, 0),
+	FG_SRAM_PARAM_DEF(DATA_BATT_ESR, NULL, 0x544, 2, 2, 0, 0, 0, NULL,
+			fg_decode_float, 0),
+	FG_SRAM_PARAM_DEF(DATA_BATT_SOC, NULL, 0x56c, 1, 3, PMI8950_FULL_PERCENT_3B,
+			10000, 0, NULL, fg_decode_value_16b, 0),
+	FG_SRAM_PARAM_DEF(DATA_BATT_ESR_REG, NULL, 0x4f4, 2, 2, 0, 0, 0, NULL,
+			fg_decode_float, 0),
+	FG_SRAM_PARAM_DEF(DATA_NOM_CAP, NULL, 0x4f4, 0, 2, 1000, 0, 0, NULL,
+			fg_decode_value_le, 0),
+	FG_SRAM_PARAM_DEF(DATA_CYCLE_COUNT, NULL, 0x5e8, 0, 2, 0, 0, 0, NULL,
+			fg_decode_value_le, 0),
+	FG_SRAM_PARAM_DEF(PARAM_ACTUAL_CAP, NULL, 0x578, 2, 2, 0, 0, 0,
+			fg_encode_default, NULL, 0),
+	FG_SRAM_PARAM_DEF(PARAM_ACTUAL_CHARGE, NULL, 0x578, 0, 2, 0, 0, 0,
+			fg_encode_float, NULL, 0),
+	FG_SRAM_PARAM_DEF(DATA_CHARGE_COUNTER, NULL, 0x5bc, 3, 4, 0, 0, 0,
+			NULL, fg_decode_cc_soc_pmi8950, 0),
+	FG_SRAM_PARAM_DEF(SETTING_TERM_CURRENT, "qcom,term-current-ma", 0x40c,
+			2, 2, PMI8950_LSB_16B_NUMRTR * 1000,
+			PMI8950_LSB_16B_DENMTR, 0, fg_encode_default, NULL, 250),
+	FG_SRAM_PARAM_DEF(SETTING_CHG_TERM_CURRENT, "qcom,chg-term-current-ma",
+			0x4f8, 2, 2, -PMI8950_LSB_16B_NUMRTR * 1000,
+			PMI8950_LSB_16B_DENMTR, 0, fg_encode_current, NULL, 0),
+	FG_SRAM_PARAM_DEF(SETTING_CUTOFF_VOLT, "qcom,cutoff-volt-mv",
+			0x40c, 0, 2, PMI8950_LSB_16B_NUMRTR * 1000,
+			PMI8950_LSB_16B_DENMTR, 0, fg_encode_current, NULL, 3200),
+	FG_SRAM_PARAM_DEF(SETTING_EMPTY_VOLT, NULL, 0x458, 3, 1, 1, 9766, 0,
+			fg_encode_voltcmp8, NULL, 3100),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_LOW, "qcom,low-volt-thr", 0x458, 0, 1,
+			512, 1000, 0, fg_encode_roundoff, NULL, 4200),
+	FG_SRAM_PARAM_DEF(SETTING_DELTA_MSOC, "qcom,delta-soc-thr", 0x450, 3, 1,
+			255, 100, 0, fg_encode_roundoff, NULL, 1),
+	FG_SRAM_PARAM_DEF(SETTING_RECHARGE_THR, "qcom,recharge-thr", 0x45c, 1, 1,
+			256, 100, 0, fg_encode_default, NULL, 0),
+	FG_SRAM_PARAM_DEF(SETTING_BCL_LM_THR, "qcom,bcl-lm-thr-ma", 0x47c, 2, 1,
+			100, 976, 0, fg_encode_bcl, NULL, 50),
+	FG_SRAM_PARAM_DEF(SETTING_BCL_MH_THR, "qcom,bcl-mh-thr-ma", 0x47c, 3, 1,
+			100, 976, 0, fg_encode_bcl, NULL, 752),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_COOL_TEMP, "qcom,batt-cool-temp", 0x454,
+			0, 1, 0, 0, fg_encode_default, NULL, 100),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_WARM_TEMP, "qcom,batt-warm-temp", 0x454,
+			1, 1, 0, 0, fg_encode_default, NULL, 400),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_COLD_TEMP, "qcom,batt-cold-temp", 0x454,
+			2, 1, 0, 0, fg_encode_default, NULL, 50),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_HOT_TEMP, "qcom,batt-hot-temp", 0x454,
+			3, 1, 0, 0, fg_encode_default, NULL, 450),
+	FG_SRAM_PARAM_DEF(SETTING_THERM_DELAY, "qcom,therm-delay-us", 0x4ac,
+			3, 0, fg_encode_therm_delay, NULL, 0),
+	FG_SRAM_PARAM_DEF(SETTING_CONST_CHARGE_VOLT_THR, "qcom,const-charge-volt-thr-mv",
+			0x4f4, 0, 2, 32768, 5000, 0, fg_encode_adc, NULL, -EINVAL),
+	FG_SRAM_PARAM_DEF(SETTING_RSLOW_CHG, NULL, 0x514, 2, 2, 0, 0, 0,
+			fg_encode_float, fg_decode_float, 0),
+	FG_SRAM_PARAM_DEF(SETTING_RSLOW_DISCHG, NULL, 0x514, 0, 2, 0, 0, 0,
+			fg_encode_float, fg_decode_float, 0),
 	//TODO: change to setting?
 	[FG_DATA_VINT_ERR] = {
 		.address	= 0x560,
@@ -321,197 +277,11 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 		.decode		= fg_decode_value_16b,
 		.encode		= fg_encode_default
 	},
-	[FG_DATA_CHARGE_COUNTER] = {
-		.address	= 0x5bc,
-		.offset		= 3,
-		.length		= 4,
-		.decode		= fg_decode_cc_soc_pmi8950,
-	},
-
-	/*
-	DATA(CC_SOC,	      0x570,   0,      4),
-	DATA(CC_COUNTER,      0x5BC,   3,      4),
-	DATA(BATT_ID,         0x594,   1,      1),
-	DATA(BATT_ID_INFO,    0x594,   3,      1),*/
-
-	[FG_SETTING_TERM_CURRENT] = {
-		.name		= "qcom,term-current-ma",
-		.address	= 0x40c,
-		.offset		= 2,
-		.length		= 2,
-		.numrtr		= PMI8950_LSB_16B_NUMRTR * 1000,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.encode		= fg_encode_current,
-		.value		= 250
-	},
-	[FG_SETTING_EXTERNAL_SENSE] = {
-		.address	= 0x4ac,
-		.offset		= 0,
-	},
-	[FG_SETTING_CHG_TERM_CURRENT] = {
-		.name		= "qcom,chg-term-current-ma",
-		.address	= 0x4f8,
-		.offset		= 2,
-		.length		= 2,
-		.numrtr		= -PMI8950_LSB_16B_NUMRTR * 1000,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.encode		= fg_encode_current,
-		.value		= 250
-	},
-	[FG_SETTING_CUTOFF_VOLT] = {
-		.name		= "qcom,cutoff-volt-mv",
-		.address	= 0x40c,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= PMI8950_LSB_16B_NUMRTR * 1000,
-		.denmtr		= PMI8950_LSB_16B_DENMTR,
-		.encode		= fg_encode_current,
-		.value		= 3200
-	},
-	[FG_SETTING_EMPTY_VOLT] = {
-		/*.name		= "qcom,empty-volt-mv", do not parse*/
-		.address	= 0x458,
-		.offset		= 3,
-		.length		= 1,
-		.numrtr		= 1,
-		.denmtr		= 9766,
-		.encode		= fg_encode_voltcmp8,
-		.value		= 3100
-	},
-	[FG_SETTING_BATT_LOW] = {
-		.name		= "qcom,low-volt-thr",
-		.address	= 0x458,
-		.offset		= 0,
-		.length		= 1,
-		.numrtr		= 512,
-		.denmtr		= 1000,
-		.encode		= fg_encode_roundoff,
-		.value		= 4200
-	},
-	[FG_SETTING_DELTA_MSOC] = {
-		.name		= "qcom,delta-soc-thr",
-		.address	= 0x450,
-		.offset		= 3,
-		.length		= 1,
-		.numrtr		= 255,
-		.denmtr		= 100,
-		.encode		= fg_encode_roundoff,
-		.value		= 1
-	},
 	[FG_SETTING_THERMAL_COEFFS] = {
 		.address	= 0x444,
 		.offset		= 2,
 		.length		= 0,
 	},
-	[FG_SETTING_RECHARGE_THR] = {
-		.name		= "qcom,recharge-thr",
-		.address	= 0x45c,
-		.offset		= 1,
-		.length		= 1,
-		.numrtr		= 256,
-		.denmtr		= 100,
-		.encode		= fg_encode_default,
-	},
-	[FG_SETTING_ADC_CONF] = {
-		.address	= 0x4b8,
-		.offset		= 3,
-		.length		= 1,
-		.encode		= fg_encode_default,
-	},
-	[FG_SETTING_BCL_LM_THR] = {
-		.name		= "qcom,bcl-lm-thr-ma",
-		.address	= 0x47c,
-		.offset		= 2,
-		.length		= 1,
-		.numrtr		= 100,
-		.denmtr		= 976,
-		.encode		= fg_encode_bcl,
-		.value		= 50
-	},
-	[FG_SETTING_BCL_MH_THR] = {
-		.name		= "qcom,bcl-mh-thr-ma",
-		.address	= 0x47c,
-		.offset		= 3,
-		.length		= 1,
-		.numrtr		= 100,
-		.denmtr		= 976,
-		.encode		= fg_encode_bcl,
-		.value		= 752
-	},
-	[FG_SETTING_BATT_COOL_TEMP] = {
-		.name		= "qcom,batt-cool-temp",
-		.address	= 0x454,
-		.offset		= 0,
-		.length		= 1,
-		.encode		= fg_encode_default,
-		.value		= 100
-	},
-	[FG_SETTING_BATT_WARM_TEMP] = {
-		.name		= "qcom,batt-warm-temp",
-		.address	= 0x454,
-		.offset		= 1,
-		.length		= 1,
-		.encode		= fg_encode_default,
-		.value		= 400
-	},
-	[FG_SETTING_BATT_COLD_TEMP] = {
-		.name		= "qcom,batt-cold-temp",
-		.address	= 0x454,
-		.offset		= 2,
-		.length		= 1,
-		.encode		= fg_encode_default,
-		.value		= 50
-	},
-	[FG_SETTING_BATT_HOT_TEMP] = {
-		.name		= "qcom,batt-hot-temp",
-		.address	= 0x454,
-		.offset		= 3,
-		.length		= 1,
-		.encode		= fg_encode_default,
-		.value		= 450
-	},
-	[FG_SETTING_THERM_DELAY] = {
-		.name		= "qcom,therm-delay-us",
-		.address	= 0x4ac,
-		.offset		= 3,
-		.length		= 0,	//to avoid using dts
-		.encode		= fg_encode_therm_delay,
-		.value		= 0
-	},
-	[FG_SETTING_CONST_CHARGE_VOLT_THR] = {
-		.name		= "qcom,const-charge-volt-thr-mv",
-		.address	= 0x4f8,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= 32768,
-		.denmtr		= 5000,
-		.encode		= fg_encode_adc,
-		.value		= -EINVAL,
-	},
-	[FG_SETTING_RSLOW_CHG] = {
-		.address	= 0x514,
-		.offset		= 2,
-		.length		= 2,
-		.encode		= fg_encode_float,
-		.decode		= fg_decode_float,
-	},
-	[FG_SETTING_RSLOW_DISCHG] = {
-		.address	= 0x514,
-		.offset		= 0,
-		.length		= 2,
-		.encode		= fg_encode_float,
-		.decode		= fg_decode_float,
-	},
-	[FG_BATT_PROFILE_INTEGRITY] = {
-		.address	= 0x53c,
-		.offset		= 0,
-		.length		= 1,
-	},
-	[FG_SETTING_ALG] = {
-		.address	= 0x4b0,
-		.offset		= 3,
-		.length		= 1,
-	}
 };
 
 /*
@@ -611,13 +381,6 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.numrtr		= 1000,
 		.decode		= fg_decode_value_le,
 	},
-	[FG_DATA_ACT_CAP] = {
-		.address	= 117,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= 1000,
-		.decode		= fg_decode_default,
-	},
 	[FG_DATA_CYCLE_COUNT] = {
 		.address	= 75,
 		.offset		= 0,
@@ -632,12 +395,6 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.numrtr		= 1000,
 		.denmtr		= 488281,
 		.decode 	= fg_decode_current,
-	},
-	[FG_SETTING_ALG] = {
-		.address	= 120,
-		.offset		= 1,
-		.length		= 1,
-		.decode		= fg_decode_default
 	},
 	[FG_SETTING_CUTOFF_VOLT] = {
 		.name		= "qcom,cutoff-volt-mv",
@@ -749,12 +506,6 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.address	= 51,
 		.offset		= 0,
 		.length		= 1,
-	},
-	[FG_BATT_PROFILE_INTEGRITY] = {
-		.address	= 79,
-		.offset		= 3,
-		.length		= 1,
-		.value		= BIT(0),
 	},
 	[FG_SETTING_BATT_COOL_TEMP] = {
 		.name		= "qcom,batt-cool-temp",
@@ -872,13 +623,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.numrtr		= 1000,
 		.decode		= fg_decode_value_le
 	},
-	[FG_DATA_ACT_CAP] = {
-		.address	= 117,
-		.offset		= 0,
-		.length		= 2,
-		.numrtr		= 1000,
-		.decode		= fg_decode_default,
-	},
 	[FG_DATA_CYCLE_COUNT] = {
 		.address	= 75,
 		.offset		= 0,
@@ -893,12 +637,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.numrtr		= 1000,
 		.denmtr		= 488281,
 		.decode 	= fg_decode_current,
-	},
-	[FG_SETTING_ALG] = {
-		.address	= 120,
-		.offset		= 1,
-		.length		= 1,
-		.decode		= fg_decode_default
 	},
 	[FG_SETTING_CUTOFF_VOLT] = {
 		.name		= "qcom,cutoff-volt-mv",
@@ -1039,12 +777,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.address	= 51,
 		.offset		= 0,
 		.length		= 1,
-	},
-	[FG_BATT_PROFILE_INTEGRITY] = {
-		.address	= 79,
-		.offset		= 3,
-		.length		= 1,
-		.value		= BIT(0),
 	},
 	[FG_SETTING_BATT_COOL_TEMP] = {
 		.name		= "qcom,batt-cool-temp",
@@ -2762,29 +2494,30 @@ static int fg_get_param(struct fg_chip *chip, enum fg_sram_param_id id,
 	return 0;
 }
 
-static int fg_sram_masked_write_param(struct fg_chip *chip,
-		enum fg_sram_param_id id, u8 mask, u8 val)
+static int fg_sram_masked_write(struct fg_chip *chip, u16 addr,
+		u8 mask, u8 val, u8 offset)
 {
 	int rc = 0;
 	u8 reg[4];
-	u8 encoded_val;
-	struct fg_sram_param param = chip->param[id];
 
-	if (param.encode)
-		param.encode(param, val, &encoded_val);
-	else
-		encoded_val = val;
-
-	rc = fg_sram_read(chip, reg, param.address, 4, 0, true);
+	rc = fg_sram_read(chip, reg, addr, 4, 0, 1);
 	if (rc)
 		return rc;
 
-	reg[param.offset] &= ~mask;
-	reg[param.offset] |= encoded_val & mask;
+	reg[offset] &= ~mask;
+	reg[offset] |= val & mask;
 
-	rc = fg_sram_write(chip, reg, param.address, 4, 0, false);
+	rc = fg_sram_write(chip, reg, addr, 4, 0, 0);
 
 	return rc;
+}
+
+static int fg_sram_masked_write_param(struct fg_chip *chip,
+		enum fg_sram_param_id id, u8 mask, u8 val)
+{
+	struct fg_sram_param param = chip->param[id];
+
+	return fg_sram_masked_write(chip, param.address, mask, val, param.offset);
 }
 
 static int fg_get_capacity(struct fg_chip *chip, int *val)
@@ -2837,9 +2570,9 @@ static int fg_get_health_status(struct fg_chip *chip)
 	return chip->health;
 }
 
-#define RCONN_CONFIG_BIT	BIT(0)
-#define PROFILE_INTEGRITY_WORD	79
-#define RCONN_CONF_STS_OFFSET	0
+#define RCONN_CONFIG_BIT		BIT(0)
+#define PMI8998_PROFILE_INTEGRITY_REG	79
+#define RCONN_CONF_STS_OFFSET		0
 static int fg_rconn_config_pmi8998(struct fg_chip *chip)
 {
 	int rc, esr_uohms;
@@ -2849,7 +2582,7 @@ static int fg_rconn_config_pmi8998(struct fg_chip *chip)
 	if (!chip->batt_info.rconn_mohm)
 		return 0;
 
-	rc = fg_sram_read(chip, (u8 *)&val, PROFILE_INTEGRITY_WORD,
+	rc = fg_sram_read(chip, (u8 *)&val, PMI8998_PROFILE_INTEGRITY_REG,
 			1, RCONN_CONF_STS_OFFSET, false);
 	if (rc < 0) {
 		pr_err("Error in reading RCONN_CONF_STS, rc=%d\n", rc);
@@ -2898,7 +2631,7 @@ static int fg_rconn_config_pmi8998(struct fg_chip *chip)
 	}
 
 	val = RCONN_CONFIG_BIT;
-	rc = fg_sram_write(chip, (u8 *)&val, PROFILE_INTEGRITY_WORD, 1,
+	rc = fg_sram_write(chip, (u8 *)&val, PMI8998_PROFILE_INTEGRITY_REG, 1,
 			RCONN_CONF_STS_OFFSET, false);
 	if (rc < 0) {
 		pr_err("Error in writing RCONN_CONF_STS, rc=%d\n", rc);
@@ -2953,6 +2686,8 @@ static int fg_rconn_config_pmi8950(struct fg_chip *chip)
 	return 0;
 }
 
+#define FG_ADC_CONFIG_REG		0x4b8
+#define FG_ALG_SYSCTL_REG		0x4b0
 #define FG_CYCLE_MS			1500
 #define BCL_FORCED_HPM_IN_CHARGE	BIT(2)
 #define IRQ_USE_VOLTAGE_HYST_BIT	BIT(0)
@@ -2961,6 +2696,10 @@ static int fg_rconn_config_pmi8950(struct fg_chip *chip)
 #define EMPTY_SOC_IRQ_MASK		(IRQ_USE_VOLTAGE_HYST_BIT | \
 					EMPTY_FROM_SOC_BIT | \
 					EMPTY_FROM_VOLTAGE_BIT)
+#define ALERT_CFG_OFFSET		3
+#define EXTERNAL_SENSE_SELECT		0x4ac
+#define EXTERNAL_SENSE_OFFSET		2
+#define EXTERNAL_SENSE_BIT		BIT(2)
 static int fg_hw_init_pmi8950(struct fg_chip *chip)
 {
 	int rc;
@@ -2973,8 +2712,8 @@ static int fg_hw_init_pmi8950(struct fg_chip *chip)
 		return rc;
 	}
 
-	rc = fg_sram_masked_write_param(chip, FG_SETTING_EXTERNAL_SENSE,
-			BIT(2), 0);
+	rc = fg_sram_masked_write(chip, EXTERNAL_SENSE_SELECT,
+			EXTERNAL_SENSE_BIT, 0, EXTERNAL_SENSE_OFFSET);
 
 	if (chip->param[FG_SETTING_THERMAL_COEFFS].length > 0) {
 		rc = fg_set_sram_param(chip, FG_SETTING_THERMAL_COEFFS,
@@ -2996,8 +2735,8 @@ static int fg_hw_init_pmi8950(struct fg_chip *chip)
 	 * Clear bits 0-2 in 0x4B3 and set them again to make empty_soc irq
 	 * trigger again.
 	 */
-	rc = fg_sram_masked_write_param(chip, FG_SETTING_ALG,
-			EMPTY_SOC_IRQ_MASK, 0);
+	rc = fg_sram_masked_write(chip, FG_ALG_SYSCTL_REG, EMPTY_SOC_IRQ_MASK,
+			0, ALERT_CFG_OFFSET);
 	if (rc) {
 		pr_err("failed to write to fg_alg_sysctl rc=%d\n", rc);
 		return rc;
@@ -3006,15 +2745,15 @@ static int fg_hw_init_pmi8950(struct fg_chip *chip)
 	/* Wait for a FG cycle before enabling empty soc irq configuration */
 	msleep(FG_CYCLE_MS);
 
-	rc = fg_sram_masked_write_param(chip, FG_SETTING_ALG,
-			EMPTY_SOC_IRQ_MASK, EMPTY_SOC_IRQ_MASK);
+	rc = fg_sram_masked_write(chip, FG_ALG_SYSCTL_REG, EMPTY_SOC_IRQ_MASK,
+			EMPTY_SOC_IRQ_MASK, ALERT_CFG_OFFSET);
 	if (rc) {
 		pr_err("failed to write to fg_alg_sysctl rc=%d\n", rc);
 		return rc;
 	}
 
-	rc = fg_sram_masked_write_param(chip, FG_SETTING_ADC_CONF,
-			BCL_FORCED_HPM_IN_CHARGE, BCL_FORCED_HPM_IN_CHARGE);
+	rc = fg_sram_masked_write(chip, FG_ADC_CONFIG_REG,
+			BCL_FORCED_HPM_IN_CHARGE, BCL_FORCED_HPM_IN_CHARGE, 3);
 	if (rc) {
 		dev_err(chip->dev, "failed to set HPM_IN_CHARGE\n");
 		return rc;
@@ -3088,6 +2827,9 @@ static int get_vbat_est_diff(struct fg_chip *chip, int *diff)
 #define FG_PROFILE_LEN_PMI8950		128
 #define FG_PROFILE_LEN_PMI8998		224
 #define PROFILE_INTEGRITY_BIT		BIT(0)
+#define PMI8950_BATT_PROFILE_REG	0x4c0
+#define PMI8998_BATT_PROFILE_REG	24
+#define PMI8950_PROFILE_INTEGRITY_REG	0x53c
 static bool is_profile_load_required(struct fg_chip *chip)
 {
 	u8 buf[FG_PROFILE_LEN_PMI8998];
@@ -3095,7 +2837,17 @@ static bool is_profile_load_required(struct fg_chip *chip)
 	bool profiles_same = false;
 	int rc;
 
-	rc = fg_get_param(chip, FG_BATT_PROFILE_INTEGRITY, &val);
+	switch (chip->pmic_version) {
+	case PMI8950:
+		rc = fg_sram_read(chip, (u8 *)&val, PMI8950_PROFILE_INTEGRITY_REG,
+				1, 0, false);
+		break;
+	case PMI8998_V1:
+	case PMI8998_V2:
+		rc = fg_sram_read(chip, (u8 *)&val, PMI8998_PROFILE_INTEGRITY_REG,
+				1, 3, false);
+		break;
+	}
 	if (rc < 0) {
 		pr_err("failed to read profile integrity rc=%d\n", rc);
 		return false;
@@ -3114,9 +2866,19 @@ static bool is_profile_load_required(struct fg_chip *chip)
 			return true;
 		}
 
-		rc = fg_sram_read(chip, buf, chip->param[FG_BATT_PROFILE].address,
-				chip->param[FG_BATT_PROFILE].length,
-				chip->param[FG_BATT_PROFILE].offset, false);
+		switch (chip->pmic_version) {
+		case PMI8950:
+			rc = fg_sram_read(chip, buf, PMI8950_BATT_PROFILE_REG,
+					128, 0, false);
+			chip->batt_info.batt_profile_len = 128;
+			break;
+		case PMI8998_V1:
+		case PMI8998_V2:
+			rc = fg_sram_read(chip, buf, PMI8998_BATT_PROFILE_REG,
+					148, 0, false);
+			chip->batt_info.batt_profile_len = 148;
+			break;
+		}
 		if (rc < 0) {
 			pr_err("Error in reading battery profile, rc:%d\n", rc);
 			return false;
@@ -3198,7 +2960,6 @@ static int fg_of_battery_profile_init(struct fg_chip *chip)
 	if (data && ((len == 6 && chip->pmic_version == PMI8950) ||
 			(len == 3 && chip->pmic_version != PMI8950))) {
 		memcpy(chip->batt_info.thermal_coeffs, data, len);
-		chip->param[FG_SETTING_THERMAL_COEFFS].length = len;
 	}
 
 	data = of_get_property(batt_node, "qcom,fg-profile-data", &len);
@@ -3411,6 +3172,7 @@ fail:
 	return rc;
 }
 
+#define PMI8950_MAH_TO_SOC_CONV_REG	0x4a0
 #define CC_SOC_COEFF_OFFSET		0
 static int fg_calc_and_store_cc_soc_coeff(struct fg_chip *chip, int16_t cc_mah)
 {
@@ -3423,12 +3185,14 @@ static int fg_calc_and_store_cc_soc_coeff(struct fg_chip *chip, int16_t cc_mah)
 		return rc;
 	}
 
-	rc = fg_get_param(chip, FG_PARAM_MAH_TO_SOC_CONV, &mah_to_soc);
+	rc = fg_sram_read(chip, (u8 *)& mah_to_soc, PMI8950_MAH_TO_SOC_CONV_REG,
+			2, 0, false);
 	if (rc) {
 		pr_err("Failed to read mah_to_soc_conv_cs: %d\n", rc);
 	} else {
 		cc_to_soc_coeff = div64_s64(mah_to_soc, cc_mah);
-		rc = fg_set_sram_param(chip, FG_PARAM_ACTUAL_CAP, (u8 *)&cc_to_soc_coeff);
+		rc = fg_set_sram_param(chip, FG_PARAM_ACTUAL_CAP,
+				(u8 *)&cc_to_soc_coeff);
 		if (rc)
 			pr_err("Failed to write cc_soc_coeff_offset: %d\n",
 				rc);
@@ -3501,6 +3265,8 @@ out:
 #endif
 }
 
+#define FG_PMI8950_ACT_CAP_REG	0x5e4
+#define FG_PMI8998_ACT_CAP_REG	117
 static void fg_cap_learning_save_data(struct fg_chip *chip)
 {
 	int16_t cc_mah;
@@ -3514,7 +3280,17 @@ static void fg_cap_learning_save_data(struct fg_chip *chip)
 
 	cc_mah = div64_s64(chip->learning_data.learned_cc_uah, 1000);
 
-	rc = fg_set_sram_param(chip, FG_DATA_ACT_CAP, (u8 *)&cc_mah);
+	switch (chip->pmic_version) {
+	case PMI8950:
+		rc = fg_sram_write(chip, (u8 *)&cc_mah, FG_PMI8950_ACT_CAP_REG,
+				2, 0, false);
+		break;
+	case PMI8998_V1:
+	case PMI8998_V2:
+		rc = fg_sram_write(chip, (u8 *)&cc_mah, FG_PMI8998_ACT_CAP_REG,
+				2, 0, false);
+		break;
+	}
 	if (rc)
 		pr_err("Failed to store aged capacity: %d\n", rc);
 
