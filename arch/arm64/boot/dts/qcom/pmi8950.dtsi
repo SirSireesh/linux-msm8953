@@ -120,26 +120,63 @@
 		};
 
 		qcom_smbcharger {
-			compatible = "qcom,pmi8950-charger";
+			compatible = "qcom,pm8941-charger";
 			reg = <0x1000>;
 			status = "okay";
 
-			interrupts = <0x0 0x10 7 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x10 5 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x10 4 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x12 1 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x12 0 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x13 2 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x13 1 IRQ_TYPE_EDGE_BOTH>,
-				     <0x0 0x14 1 IRQ_TYPE_EDGE_BOTH>;
-			interrupt-names = "chg-done",
-					  "chg-fast",
-					  "chg-trkl",
-					  "bat-temp-ok",
-					  "bat-present",
-					  "chg-gone",
-					  "usb-valid",
-					  "dc-valid";
+			interrupts = <0x2 0x10 0 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 1 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 2 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 3 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 4 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 5 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 6 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x10 7 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 0 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 1 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 2 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 3 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 4 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 5 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 6 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x12 7 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x13 0 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x13 1 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x13 2 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x13 5 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x16 0 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x16 1 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x16 2 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x16 3 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x16 4 IRQ_TYPE_EDGE_BOTH>,
+				     <0x2 0x16 5 IRQ_TYPE_EDGE_BOTH>;
+			interrupt-names = "chg-error",
+					  "chg-inhibit",
+					  "chg-prechg-sft",
+					  "chg-complete-chg-sft",
+					  "chg-p2f-thr",
+					  "chg-rechg-thr",
+					  "chg-taper-thr",
+					  "chg-tcc-thr",
+					  "batt-hot",
+					  "batt-warm",
+					  "batt-cold",
+					  "batt-cool",
+					  "batt-ov",
+					  "batt-low",
+					  "batt-missing",
+					  "batt-term-missing",
+					  "usbin-uv",
+					  "usbin-ov",
+					  "usbin-src-det",
+					  "aicl-done",
+					  "power-ok",
+					  "temp-shutdown",
+					  "wdog-timeout",
+					  "flash-fail",
+					  "otst2",
+					  "otst3";
+
 			chg_otg: otg-vbus { };
 		};
 
@@ -175,8 +212,41 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			compatible = "qcom,pmi8950-fg";
-			//       soc    bat   memif
-			reg = <0x4000 0x4100 0x4400>;
+			reg = <0x4000>;
+			interrupts = <2 0x40 0 IRQ_TYPE_NONE>,
+				<2 0x40 1 IRQ_TYPE_NONE>,
+				<2 0x40 2 IRQ_TYPE_NONE>,
+				<2 0x40 3 IRQ_TYPE_NONE>,
+				<2 0x40 4 IRQ_TYPE_NONE>,
+				<2 0x40 5 IRQ_TYPE_NONE>,
+				<2 0x40 6 IRQ_TYPE_NONE>,
+				<2 0x41 0 IRQ_TYPE_NONE>,
+				<2 0x41 1 IRQ_TYPE_NONE>,
+				<2 0x41 2 IRQ_TYPE_NONE>,
+				<2 0x41 3 IRQ_TYPE_NONE>,
+				<2 0x41 4 IRQ_TYPE_NONE>,
+				<2 0x41 5 IRQ_TYPE_NONE>,
+				<2 0x41 6 IRQ_TYPE_NONE>,
+				<2 0x41 7 IRQ_TYPE_NONE>,
+				<2 0x44 0 IRQ_TYPE_NONE>,
+				<2 0x44 2 IRQ_TYPE_NONE>;
+			interrupt-names = "high-soc",
+					"low-soc",
+					"full-soc",
+					"empty-soc",
+					"delta-soc",
+					"first-est-done",
+					"update-soc",
+					"soft-cold",
+					"soft-hot",
+					"vbatt-low",
+					"batt-ided",
+					"batt-id-req",
+					"batt-unknown",
+					"batt-missing",
+					"batt-match",
+					"mem-avail",
+					"data-rcvry-sug";
 			qcom,cycle-counter-en;
 			qcom,capacity-learning-on;
 			qcom,batt-warm-temp = <250>;
