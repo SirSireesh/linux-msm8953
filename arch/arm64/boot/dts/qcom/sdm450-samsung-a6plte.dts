@@ -14,6 +14,7 @@
 #include "msm8953.dtsi"
 #include "pm8953.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
 
 / {
 	model = "Samsung A6-Plus LTE Rev.4";
@@ -47,7 +48,7 @@
 			reg = <0x0 0x8f600000 0x0 0x300000>;
 		};
 
-		ramoops_mem: ramoops@86100000 {
+		ramoops@86100000 {
 			compatible = "ramoops";
 			reg = <0 0x86100000 0 0x100000>;
 			record-size = <0x00000>;
@@ -99,7 +100,7 @@
 		};
 	};
 
-	reg_vdd_tsp: regulator-vdd-tsp {
+	vdd_tsp: regulator-vdd-tsp {
 		compatible = "regulator-fixed";
 		regulator-name = "tsp_ldo";
 		regulator-min-microvolt = <1800000>;
@@ -114,7 +115,73 @@
 		pinctrl-0 = <&tsp_en_default>;
 	};
 
-	i2c_10: i2c@10 {
+	vdd_proximity: regulator-vdd-proximity {
+		compatible = "regulator-fixed";
+		regulator-name = "prox_ldo";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+
+		gpio = <&msmgpio 127 GPIO_ACTIVE_HIGH>;
+
+		enable-active-high;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&prox_ldo_default>;
+	};
+
+	vdd_grip: regulator-vdd-grip {
+		compatible = "regulator-fixed";
+		regulator-name = "grip_ldo";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+
+		gpio = <&msmgpio 87 GPIO_ACTIVE_HIGH>;
+
+		enable-active-high;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&grip_ldo_default>;
+	};
+
+	vdd_accel: regulator-vdd-accel {
+		compatible = "regulator-fixed";
+		regulator-name = "accel_ldo";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+
+		gpio = <&expander 6 GPIO_ACTIVE_HIGH>;
+
+		enable-active-high;
+	};
+
+	i2c-expander {
+		compatible = "i2c-gpio";
+		sda-gpios = <&msmgpio 21 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&msmgpio 20 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		//i2c-gpio,delay-us = <2>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		expander: gpio@20 {
+			compatible = "nxp,pcal6416";
+
+			reg = <0x20>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&expander_reset_default>;
+
+			vcc-supply = <&pm8953_l5>;
+
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			//reset-gpios = <&msmgpio 33 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	i2c-battery {
 		compatible = "i2c-gpio";
 		sda-gpios = <&msmgpio 39 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 		scl-gpios = <&msmgpio 38 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
@@ -122,7 +189,7 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
-		sm5708-fuelgauge@71 {
+		fuelgauge@71 {
 			compatible = "sm5708-battery,a6plte";
 			reg = <0x71>;
 
@@ -136,7 +203,7 @@
 		};
 	};
 
-	i2c_13: i2c@13 {
+	i2c-pmic {
 		compatible = "i2c-gpio";
 		sda-gpios = <&msmgpio 98 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
 		scl-gpios = <&msmgpio 99 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
@@ -155,7 +222,7 @@
 			pinctrl-0 = <&sm5708_muic_default &sm5708_rst_default>;
 		};
 
-		pmic: sm5708@49 {
+		pmic@49 {
 			compatible = "siliconmitus,sm5708";
 			reg = <0x49>;
 
@@ -179,6 +246,111 @@
 				enable-gpios = <&msmgpio 34 GPIO_ACTIVE_HIGH>;
 			};
 		};
+	};
+
+	i2c-orientation {
+		compatible = "i2c-gpio";
+		sda-gpios = <&msmgpio 64 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&msmgpio 65 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&accel_i2c_default>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		accelerometer@6b {
+			compatible = "st,lsm6dsl";
+
+			reg = <0x6b>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&accel_int_default>;
+
+			vdd-supply = <&vdd_accel>;
+
+			interrupt-parent = <&msmgpio>;
+			interrupts = <42 IRQ_TYPE_EDGE_RISING>;
+
+			mount-matrix = "-1", "0", "0",
+				       "0", "-1", "0",
+				       "0", "0", "-1";
+		};
+	};
+
+	i2c-proximity {
+		compatible = "i2c-gpio";
+		sda-gpios = <&msmgpio 16 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&msmgpio 17 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		proximity-sensor@60 {
+			compatible = "capella,cm36658";
+
+			reg = <0x60>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&proximity_int_default>;
+
+			interrupt-parent = <&msmgpio>;
+			interrupts = <43 IRQ_TYPE_EDGE_RISING>;
+
+			ir-led-supply = <&vdd_proximity>;
+		};
+	};
+
+	i2c-grip {
+		compatible = "i2c-gpio";
+		sda-gpios = <&msmgpio 131 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&msmgpio 128 (GPIO_ACTIVE_HIGH|GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		grip-sensor@20 {
+			compatible = "abov,a96t3x6";
+
+			reg = <0x20>;
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&grip_int_default>;
+
+			interrupt-parent = <&msmgpio>;
+			interrupts = <86 IRQ_TYPE_EDGE_RISING>;
+
+			vdd-supply = <&vdd_grip>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		status = "disabled";
+
+		rear {
+			function = LED_FUNCTION_TORCH;
+			color = <LED_COLOR_ID_WHITE>;
+			gpios = <&expander 2 GPIO_ACTIVE_HIGH>;
+		};
+
+		front {
+			function = LED_FUNCTION_TORCH;
+			color = <LED_COLOR_ID_WHITE>;
+			gpios = <&expander 4 GPIO_ACTIVE_HIGH>;
+		};
+	};
+
+	vibrator {
+		compatible = "gpio-vibrator";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&vibrator_default>;
+
+		enable-gpios = <&msmgpio 132 GPIO_ACTIVE_HIGH>;
 	};
 
 	soc {
@@ -325,8 +497,8 @@
 		touchscreen-size-x = <4096>;
 		touchscreen-size-y = <4096>;
 
-		avdd-supply = <&reg_vdd_tsp>;
-		vdd-supply = <&reg_vdd_tsp>;
+		avdd-supply = <&vdd_tsp>;
+		vdd-supply = <&vdd_tsp>;
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&ts_int_default>;
@@ -352,63 +524,104 @@
 };
 
 &msmgpio {
-	gpio-reserved-ranges = <12 4>; // Fingerprint sensor
+	gpio-reserved-ranges = <12 4>; // Fingerprint sensor (SPI)
 
-	quat_tlmm_default: quat_tlmm {
+	quat_tlmm_default: quat-tlmm {
 		pins = "gpio135", "gpio136", "gpio137", "gpio138";
 		function = "sec_mi2s";
 		drive-strength = <8>;
 		bias-disable;
 	};
 
-	jack_default: jack_default {
+	jack_default: jack-default {
 		function = "gpio";
 		pins = "gpio48";
 		drive-strength = <2>;
 		bias-disable;
 	};
 
-	sm5708_fg_default: sm5708_fg_default {
-		pins = "gpio38", "gpio39", "gpio62";
+	sm5708_fg_default: sm5708-fg-default {
+		pins = "gpio62";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 	};
-	sm5708_muic_default: sm5708_muic_default {
-		pins = "gpio98", "gpio99", "gpio63";
+
+	sm5708_muic_default: sm5708-muic-default {
+		pins = "gpio63";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 	};
-	sm5708_rst_default: sm5708_rst_default {
+
+	sm5708_rst_default: sm5708-rst-default {
 		pins = "gpio61";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 		input-enable;
 	};
-	charger_int_active: charger_int_active {
+
+	charger_int_active: charger-int-active {
 		pins = "gpio60";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 	};
-	chg_en_default: chg_en_default {
+
+	chg_en_default: chg-en-default {
 		pins = "gpio34";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-down;
 		output-high;
 	};
-	ts_int_default: ts_int_default {
+
+	ts_int_default: ts-int-default {
 		pins = "gpio59";
 		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 	};
-	tsp_en_default: tsp_en_default {
+
+	grip_int_default: grip-int-default {
+		pins = "gpio86";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	accel_int_default: accel-int-default {
+		pins = "gpio42";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	proximity_int_default: proximity-int-default {
+	       pins = "gpio43";
+	       function = "gpio";
+	       drive-strength = <2>;
+	       bias-disable;
+	};
+
+	tsp_en_default: tsp-en-default {
 		function = "gpio";
 		pins = "gpio139";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	prox_ldo_default: prox-ldo-en {
+		pins = "gpio127";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	grip_ldo_default: grip-ldo-default {
+		pins = "gpio87";
+		function = "gpio";
 		drive-strength = <2>;
 		bias-disable;
 	};
@@ -416,24 +629,47 @@
 	gpio_hall_sensor_default: gpio-hall-sensor-default {
 		pins = "gpio44";
 		function = "gpio";
-		drive-strength = <2>;  /* 2 mA */
+		drive-strength = <2>;
 		bias-disable;
 		input-enable;
 	};
 	pmx_mdss_default: pmx-mdss-default {
 		pins = "gpio35", "gpio93";
 		function = "gpio";
-		drive-strength = <8>; /* 8 mA */
+		drive-strength = <8>;
 		bias-disable;
 		output-high;
+	};
+
+	accel_i2c_default: imo-i2c-default {
+		pins = "gpio64", "gpio65";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	expander_reset_default: expander-reset-default {
+		pins = "gpio33";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+		output-high;
+	};
+
+	vibrator_default: vibrator-default {
+		pins = "gpio132";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
 	};
 
 	pmx_mdss_sleep: pmx-mdss-sleep {
 		pins = "gpio35", "gpio93";
 		function = "gpio";
-		drive-strength = <2>; /* 2 mA */
+		drive-strength = <2>;
 		bias-pull-down;
 	};
+
 	key_default: key-default {
 		pins = "gpio85";
 		function = "gpio";
