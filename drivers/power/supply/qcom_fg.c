@@ -21,56 +21,43 @@
 #define INT_EN_CLR(base)			(base + 0x16)
 
 /* RAM resister offsets */
-#define RAM_OFFSET	0x400
+#define RAM_OFFSET				0x400
 
-enum soc_address {
-	SOC_MONOTONIC_SOC	= 0x09,
-	SOC_BOOT_MOD		= 0x50,
-	SOC_RESTART		= 0x51,
-	SOC_ALG_ST		= 0xcf,
-	SOC_FG_RESET		= 0xf3,
-};
+/* Bit/Mask definitions */
+#define FULL_PERCENT				0xFF
+#define MAX_TRIES_SOC				5
+#define MA_MV_BIT_RES				39
+#define MSB_SIGN				BIT(7)
+#define IBAT_VBAT_MASK				0x7f
+#define NO_OTP_PROF_RELOAD			BIT(6)
+#define REDO_FIRST_ESTIMATE			BIT(3)
+#define RESTART_GO				BIT(0)
+#define THERM_DELAY_MASK			0xe0
 
-enum mem_if_address {
-	MEM_INTF_IMA_CFG	= 0x52,
-	MEM_INTF_IMA_OPR_STS	= 0x54,
-	MEM_INTF_IMA_EXP_STS	= 0x55,
-	MEM_INTF_IMA_HW_STS	= 0x56,
-	MEM_INTF_BEAT_COUNT	= 0x57,
-	MEM_INTF_IMA_ERR_STS	= 0x5f,
-	MEM_INTF_IMA_BYTE_EN	= 0x60,
-};
+/* Registers */
+#define BATT_CAPACITY_REG(chip) 		(chip->soc_base + 0x09)
+#define SOC_BOOT_MODE_REG(chip)			(chip->soc_base + 0x50)
+#define SOC_RESTART_REG(chip)			(chip->soc_base + 0x51)
+#define SOC_ALG_STATUS_REG(chip)		(chip->soc_base + 0xcf)
+#define SOC_FG_RESET_REG(chip)			(chip->soc_base + 0xf3)
 
-enum fg_batt_aging_mode {
-	FG_AGING_NONE,
-	FG_AGING_ESR,
-	FG_AGING_CC,
-};
+#define MEM_INTF_CFG(chip)			(chip->mem_base + 0x50)
+#define MEM_INTF_CTL(chip)			(chip->mem_base + 0x51)
+#define MEM_INTF_IMA_CFG(chip)			(chip->mem_base + 0x52)
+#define MEM_INTF_IMA_OPR_STS(chip)		(chip->mem_base + 0x54)
+#define MEM_INTF_IMA_EXP_STS(chip)		(chip->mem_base + 0x55)
+#define MEM_INTF_IMA_HW_STS(chip)		(chip->mem_base + 0x56)
+#define MEM_INTF_BEAT_COUNT(chip)		(chip->mem_base + 0x57)
+#define MEM_INTF_IMA_ERR_STS(chip)		(chip->mem_base + 0x5f)
+#define MEM_INTF_IMA_BYTE_EN(chip)		(chip->mem_base + 0x60)
+#define MEM_INTF_ADDR_LSB(chip)			(chip->mem_base + 0x61)
+#define MEM_INTF_WR_DATA0(chip)			(chip->mem_base + 0x63)
+#define MEM_INTF_RD_DATA0(chip)			(chip->mem_base + 0x67)
+#define MEM_INTF_DMA_STS(chip)			(chip->mem_base + 0x70)
+#define MEM_INTF_DMA_LOG(chip)			(chip->mem_base + 0x71)
 
-enum register_type {
-	MEM_INTF_CFG,
-	MEM_INTF_CTL,
-	MEM_INTF_ADDR_LSB,
-	MEM_INTF_RD_DATA0,
-	MEM_INTF_WR_DATA0,
-	MAX_ADDRESS,
-};
-
-struct register_offset {
-	u16 address[MAX_ADDRESS];
-};
-
-#define MEM_INTF_CFG(chip)	\
-		((chip)->mem_base + (chip)->offset[MEM_INTF_CFG])
-#define MEM_INTF_CTL(chip)	\
-		((chip)->mem_base + (chip)->offset[MEM_INTF_CTL])
-#define MEM_INTF_ADDR_LSB(chip) \
-		((chip)->mem_base + (chip)->offset[MEM_INTF_ADDR_LSB])
-#define MEM_INTF_RD_DATA0(chip) \
-		((chip)->mem_base + (chip)->offset[MEM_INTF_RD_DATA0])
-#define MEM_INTF_WR_DATA0(chip) \
-		((chip)->mem_base + (chip)->offset[MEM_INTF_WR_DATA0])
-
+/* Gen3 FG specific: */
+#define BATT_SOC_RESTART(chip)			(chip->batt_base + 0x48)
 #define BATT_INFO_THERM_C1(chip)		(chip->batt_base + 0x5c)
 #define BATT_INFO_VBATT_LSB(chip)		(chip->batt_base + 0xa0)
 #define BATT_INFO_VBATT_MSB(chip)		(chip->batt_base + 0xa1)
@@ -78,7 +65,25 @@ struct register_offset {
 #define BATT_INFO_IBATT_MSB(chip)		(chip->batt_base + 0xa3)
 #define BATT_INFO_BATT_TEMP_LSB(chip)		(chip->batt_base + 0x50)
 #define BATT_INFO_BATT_TEMP_MSB(chip)		(chip->batt_base + 0x51)
+#define BATT_INFO_JEITA_COLD(chip)		(chip->batt_base + 0x62)
+#define BATT_INFO_JEITA_COOL(chip)		(chip->batt_base + 0x63)
+#define BATT_INFO_JEITA_WARM(chip)		(chip->batt_base + 0x64)
+#define BATT_INFO_JEITA_HOT(chip)		(chip->batt_base + 0x65)
+/* Gen3 v2 specific */
+#define BATT_INFO_ESR_PULL_DN_CFG(chip)		(chip->batt_base + 0x69)
+#define BATT_INFO_ESR_FAST_CRG_CFG(chip)	(chip->batt_base + 0x6A)
 
+/* BATT_INFO_ESR_FAST_CRG_CFG */
+#define ESR_FAST_CRG_IVAL_MASK			GENMASK(3, 1)
+#define ESR_FCC_300MA				0x0
+#define ESR_FCC_600MA				0x1
+#define ESR_FCC_1A				0x2
+#define ESR_FCC_2A				0x3
+#define ESR_FCC_3A				0x4
+#define ESR_FCC_4A				0x5
+#define ESR_FCC_5A				0x6
+#define ESR_FCC_6A				0x7
+#define ESR_FAST_CRG_CTL_EN_BIT			BIT(0)
 #define BATT_TEMP_LSB_MASK			GENMASK(7, 0)
 #define BATT_TEMP_MSB_MASK			GENMASK(2, 0)
 
@@ -873,7 +878,6 @@ struct fg_chip {
 	int health;
 	int status;
 	int vbatt_est_diff;
-	enum fg_batt_aging_mode batt_aging_mode;
 
 	//board specific init fn
 	int (*init_fn)(struct fg_chip *);
@@ -1414,7 +1418,7 @@ static int fg_run_iacs_clear_sequence(struct fg_chip *chip)
 	u8 temp;
 
 	/* clear the error */
-	rc = fg_masked_write(chip, chip->mem_base + MEM_INTF_IMA_CFG,
+	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
 				IMA_IACS_CLR, IMA_IACS_CLR);
 	if (rc) {
 		pr_err("Error writing to IMA_CFG, rc=%d\n", rc);
@@ -1441,7 +1445,7 @@ static int fg_run_iacs_clear_sequence(struct fg_chip *chip)
 		return rc;
 	}
 
-	rc = fg_masked_write(chip, chip->mem_base + MEM_INTF_IMA_CFG,
+	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
 				IMA_IACS_CLR, 0);
 	if (rc) {
 		pr_err("Error writing to IMA_CFG, rc=%d\n", rc);
@@ -1465,14 +1469,14 @@ static int fg_check_and_clear_ima_errors(struct fg_chip *chip,
 	bool run_err_clr_seq = false;
 
 	rc = fg_read(chip, &err_sts,
-			chip->mem_base + MEM_INTF_IMA_ERR_STS, 1);
+			MEM_INTF_IMA_ERR_STS(chip), 1);
 	if (rc) {
 		pr_err("failed to read IMA_ERR_STS, rc=%d\n", rc);
 		return rc;
 	}
 
 	rc = fg_read(chip, &exp_sts,
-			chip->mem_base + MEM_INTF_IMA_EXP_STS, 1);
+			MEM_INTF_IMA_EXP_STS(chip), 1);
 	if (rc) {
 		pr_err("Error in reading IMA_EXP_STS, rc=%d\n", rc);
 		return rc;
@@ -1481,7 +1485,7 @@ static int fg_check_and_clear_ima_errors(struct fg_chip *chip,
 
 	if (check_hw_sts) {
 		rc = fg_read(chip, &hw_sts,
-				chip->mem_base + MEM_INTF_IMA_HW_STS, 1);
+				MEM_INTF_IMA_HW_STS(chip), 1);
 		if (rc) {
 			pr_err("Error in reading IMA_HW_STS, rc=%d\n", rc);
 			return rc;
@@ -1520,7 +1524,7 @@ static int fg_check_and_clear_ima_errors(struct fg_chip *chip,
 #define RESET_MASK	(BIT(7) | BIT(5))
 static int fg_reset(struct fg_chip *chip, bool reset)
 {
-	return fg_masked_write(chip, chip->soc_base + SOC_FG_RESET,
+	return fg_masked_write(chip, SOC_FG_RESET_REG(chip),
 		0xff, reset ? RESET_MASK : 0);
 }
 
@@ -1579,7 +1583,7 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 	fg_enable_irqs(chip, false);
 
 	/* Acquire IMA access forcibly from FG ALG */
-	rc = fg_masked_write(chip, chip->mem_base + MEM_INTF_IMA_CFG,
+	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
 			EN_WR_FGXCT_PRD | EN_RD_FGXCT_PRD,
 			EN_WR_FGXCT_PRD | EN_RD_FGXCT_PRD);
 	if (rc) {
@@ -1588,7 +1592,7 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 	}
 
 	/* Release the IMA access now so that FG reset can go through */
-	rc = fg_masked_write(chip, chip->mem_base + MEM_INTF_IMA_CFG,
+	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
 			EN_WR_FGXCT_PRD | EN_RD_FGXCT_PRD, 0);
 	if (rc) {
 		dev_err(chip->dev, "Error in writing to IMA_CFG, rc=%d\n", rc);
@@ -1635,7 +1639,7 @@ static int fg_check_alg_status(struct fg_chip *chip)
 		return 0;
 	}
 
-	rc = fg_read(chip, &alg_sts, chip->soc_base + SOC_ALG_ST, 1);
+	rc = fg_read(chip, &alg_sts, SOC_ALG_STATUS_REG(chip), 1);
 	if (rc) {
 		dev_err(chip->dev, "Error in reading SOC_ALG_ST, rc=%d\n", rc);
 		return rc;
@@ -1643,7 +1647,7 @@ static int fg_check_alg_status(struct fg_chip *chip)
 
 	do {
 		rc = fg_read(chip, &ima_opr_sts,
-			chip->mem_base + MEM_INTF_IMA_OPR_STS, 1);
+			MEM_INTF_IMA_OPR_STS(chip), 1);
 		if (!rc && !(ima_opr_sts & FGXCT_PRD))
 			break;
 
@@ -1653,7 +1657,7 @@ static int fg_check_alg_status(struct fg_chip *chip)
 			break;
 		}
 
-		rc = fg_read(chip, &temp, chip->soc_base + SOC_ALG_ST,
+		rc = fg_read(chip, &temp, SOC_ALG_STATUS_REG(chip),
 			1);
 		if (rc) {
 			dev_err(chip->dev, "Error in reading SOC_ALG_ST, rc=%d\n",
@@ -1690,7 +1694,7 @@ static int fg_check_iacs_ready(struct fg_chip *chip)
 	usleep_range(30, 35);
 	do {
 		rc = fg_read(chip, &ima_opr_sts,
-			chip->mem_base + MEM_INTF_IMA_OPR_STS, 1);
+			MEM_INTF_IMA_OPR_STS(chip), 1);
 		if (!rc && (ima_opr_sts & IMA_IACS_RDY))
 			break;
 		/* delay for iacs_ready to be asserted */
@@ -1806,7 +1810,7 @@ static int __fg_interleaved_sram_write(struct fg_chip *chip, u8 *val,
 				byte_enable |= BIT(i);
 
 			rc = fg_write(chip, &byte_enable,
-				chip->mem_base + MEM_INTF_IMA_BYTE_EN, 1);
+				MEM_INTF_IMA_BYTE_EN(chip), 1);
 			if (rc) {
 				pr_err("Unable to write to byte_en_reg rc=%d\n",
 								rc);
@@ -2363,7 +2367,7 @@ retry:
 
 	/* read the start beat count */
 	rc = fg_read(chip, &start_beat_count,
-			chip->mem_base + MEM_INTF_BEAT_COUNT, 1);
+			MEM_INTF_BEAT_COUNT(chip), 1);
 	if (rc) {
 		pr_err("failed to read beat count rc=%d\n", rc);
 		retry = true;
@@ -2387,7 +2391,7 @@ retry:
 
 	/* read the end beat count */
 	rc = fg_read(chip, &end_beat_count,
-			chip->mem_base + MEM_INTF_BEAT_COUNT, 1);
+			MEM_INTF_BEAT_COUNT(chip), 1);
 	if (rc) {
 		pr_err("failed to read beat count rc=%d\n", rc);
 		retry = true;
@@ -2496,7 +2500,7 @@ static int fg_sram_masked_write_param(struct fg_chip *chip,
 static int fg_get_capacity(struct fg_chip *chip, int *val)
 {
 	u8 cap[2];
-	int error = fg_read(chip, cap, chip->soc_base + SOC_MONOTONIC_SOC, 2);
+	int error = fg_read(chip, cap, BATT_CAPACITY_REG(chip), 2);
 	if (error)
 		return error;
 	//choose lesser of two
@@ -2975,7 +2979,7 @@ done:
 
 static int fg_of_init(struct fg_chip *chip)
 {
-	int rc, i;
+	int rc;
 	/* default values */
 	switch (chip->pmic_version) {
 	case PMI8950:
@@ -3072,13 +3076,6 @@ static int fg_of_init(struct fg_chip *chip)
 	of_property_read_u32_array(chip->dev->of_node,
 		"qcom,fg-esr-timer-shutdown",
 		chip->dt.esr_timer_shutdown, NUM_ESR_TIMERS);
-
-	if (of_property_read_bool(chip->dev->of_node,
-				"qcom,capacity-learning-on"))
-		chip->batt_aging_mode = FG_AGING_CC;
-	else if (of_property_read_bool(chip->dev->of_node,
-				"qcom,capacity-estimation-on"))
-		chip->batt_aging_mode = FG_AGING_ESR;
 
 	chip->reset_on_lockup = of_property_read_bool(chip->dev->of_node,
 			"qcom,fg-reset-on-lockup");
@@ -3386,8 +3383,7 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 
 	mutex_lock(&chip->learning_data.learning_lock);
 	if (chip->status == POWER_SUPPLY_STATUS_CHARGING
-				&& !chip->learning_data.active
-				&& chip->batt_aging_mode == FG_AGING_CC) {
+				&& !chip->learning_data.active) {
 		if (chip->learning_data.learned_cc_uah == 0)
 			goto fail;
 
@@ -3552,15 +3548,6 @@ static void fg_status_change_work(struct work_struct *work)
 #define IACS_INTR_SRC_SLCT	BIT(3)
 static int fg_init_memif(struct fg_chip *chip)
 {
-	static struct register_offset offset[] = {
-			/* CFG   CTL   LSB   RD0   WD0 */
-		[0] = {
-			.address = {0x40, 0x41, 0x42, 0x4C, 0x48},
-		},
-		[1] = {
-			.address = {0x50, 0x51, 0x61, 0x67, 0x63},
-		},
-	};
 	enum dig_rev_offset {
 		DIG_MINOR = 0x0,
 		DIG_MAJOR = 0x1,
@@ -3583,10 +3570,8 @@ static int fg_init_memif(struct fg_chip *chip)
 	switch (chip->revision[DIG_MAJOR]) {
 	case DIG_REV_1:
 	case DIG_REV_2:
-		chip->offset = offset[0].address;
 		break;
 	case DIG_REV_3:
-		chip->offset = offset[1].address;
 		chip->ima_supported = true;
 		break;
 	default:
@@ -3595,10 +3580,8 @@ static int fg_init_memif(struct fg_chip *chip)
 		return -EINVAL;
 	}
 
-	if (chip->pmic_version == PMI8998_V1 || chip->pmic_version == PMI8998_V2) {
-		chip->offset = offset[1].address;
+	if (chip->pmic_version == PMI8998_V1 || chip->pmic_version == PMI8998_V2)
 		chip->ima_supported = true;
-	}
 
 	pr_info("FG Probe - FG Revision DIG:%d.%d ANA:%d.%d PMIC subtype=%d\n",
 		chip->revision[DIG_MAJOR], chip->revision[DIG_MINOR],
@@ -3612,7 +3595,7 @@ static int fg_init_memif(struct fg_chip *chip)
 		 * that the next transaction starts only after the hw is ready.
 		 */
 		rc = fg_masked_write(chip,
-			chip->mem_base + MEM_INTF_IMA_CFG, IACS_INTR_SRC_SLCT,
+			MEM_INTF_IMA_CFG(chip), IACS_INTR_SRC_SLCT,
 			IACS_INTR_SRC_SLCT);
 		if (rc) {
 			dev_err(chip->dev,
@@ -3663,7 +3646,7 @@ static int fg_get_property(struct power_supply *psy,
 		union power_supply_propval *val)
 {
 	struct fg_chip *chip = power_supply_get_drvdata(psy);
-	int error = 0, temp;
+	int error = 0;
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_MANUFACTURER:
