@@ -112,6 +112,7 @@ enum fg_sram_param_id {
 	FG_DATA_VINT_ERR,
 	FG_DATA_CPRED_VOLTAGE,
 	FG_DATA_CHARGE_COUNTER,
+	FG_DATA_ACT_CAP,
 	FG_DATA_NOM_CAP,
 	FG_PARAM_ACTUAL_CAP,
 	FG_PARAM_ACTUAL_CHARGE,
@@ -134,11 +135,6 @@ enum fg_sram_param_id {
 	FG_SETTING_DELTA_BSOC,
 	FG_SETTING_BCL_LM_THR,
 	FG_SETTING_BCL_MH_THR,
-	FG_SETTING_BATT_COLD_TEMP,
-	FG_SETTING_BATT_COOL_TEMP,
-	FG_SETTING_BATT_WARM_TEMP,
-	FG_SETTING_BATT_HOT_TEMP,
-	FG_SETTING_THERM_DELAY,
 	FG_SETTING_ESR_TIMER_DISCHG_MAX,
 	FG_SETTING_ESR_TIMER_DISCHG_INIT,
 	FG_SETTING_ESR_TIMER_CHG_MAX,
@@ -191,7 +187,6 @@ static void fg_encode_current(struct fg_sram_param sp, int val_ma, u8 *buf);
 static void fg_encode_float(struct fg_sram_param sp, int val_ma, u8 *buf);
 static void fg_encode_roundoff(struct fg_sram_param sp, int val_ma, u8 *buf);
 static void fg_encode_bcl(struct fg_sram_param sp, int val, u8 *buf);
-static void fg_encode_therm_delay(struct fg_sram_param sp, int val, u8 *buf);
 static void fg_encode_voltcmp8(struct fg_sram_param sp, int val, u8 *buf);
 static void fg_encode_adc(struct fg_sram_param sp, int val, u8 *buf);
 static void fg_encode_default(struct fg_sram_param sp, int val, u8 *buf);
@@ -230,6 +225,8 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_current),
 	FG_SRAM_PARAM_DEF(DATA_BATT_ESR, 0x544, 2, 2, 0, 0, 0, NULL,
 			fg_decode_float),
+	FG_SRAM_PARAM_DEF(DATA_ACT_CAP,
+			0x5e4, 0, 2, 0, 0, 0, NULL, NULL),
 	FG_SRAM_PARAM_DEF(DATA_BATT_SOC, 0x56c, 1, 3, PMI8950_FULL_PERCENT_3B,
 			10000, 0, NULL, fg_decode_value_16b),
 	FG_SRAM_PARAM_DEF(DATA_BATT_ESR_REG, 0x4f4, 2, 2, 0, 0, 0, NULL,
@@ -265,16 +262,6 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 			100, 976, 0, fg_encode_bcl, NULL),
 	FG_SRAM_PARAM_DEF(SETTING_BCL_MH_THR, 0x47c, 3, 1,
 			100, 976, 0, fg_encode_bcl, NULL),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_COOL_TEMP, 0x454,
-			0, 1, 0, 0, 0, fg_encode_default, NULL),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_WARM_TEMP, 0x454,
-			1, 1, 0, 0, 0, fg_encode_default, NULL),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_COLD_TEMP, 0x454,
-			2, 1, 0, 0, 0, fg_encode_default, NULL),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_HOT_TEMP, 0x454,
-			3, 1, 0, 0, 0, fg_encode_default, NULL),
-	FG_SRAM_PARAM_DEF(SETTING_THERM_DELAY, 0x4ac,
-			3, 0, 0, 0, 0, fg_encode_therm_delay, NULL),
 	FG_SRAM_PARAM_DEF(SETTING_CONST_CHARGE_VOLT_THR,
 			0x4f4, 0, 2, 32768, 5000, 0, fg_encode_adc, NULL),
 	FG_SRAM_PARAM_DEF(SETTING_RSLOW_CHG, 0x514, 2, 2, 0, 0, 0,
@@ -385,6 +372,12 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.numrtr		= 1,
 		.denmtr		= 1,
 		.decode		= fg_decode_cc_soc_pmi8998,
+	},
+	[FG_DATA_ACT_CAP] = {
+		.address	= 117,
+		.offset		= 0,
+		.length		= 2,
+		.decode		= fg_decode_default,
 	},
 	[FG_DATA_NOM_CAP] = {
 		.address	= 54,
@@ -500,32 +493,92 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.offset		= 0,
 		.length		= 1,
 	},
-	[FG_SETTING_BATT_COOL_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x63,
+	[FG_SETTING_ESR_TIMER_DISCHG_MAX] = {
+		.address	= 17,
 		.offset		= 0,
-		.length		= 1,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
 		.encode		= fg_encode_default,
 	},
-	[FG_SETTING_BATT_WARM_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x64,
-		.offset		= 1,
-		.length		= 1,
-		.encode		= fg_encode_default,
-	},
-	[FG_SETTING_BATT_COLD_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x62,
+	[FG_SETTING_ESR_TIMER_DISCHG_INIT] = {
+		.address	= 17,
 		.offset		= 2,
-		.length		= 1,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
 		.encode		= fg_encode_default,
 	},
-	[FG_SETTING_BATT_HOT_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x65,
+	[FG_SETTING_ESR_TIMER_CHG_MAX] = {
+		.address	= 18,
+		.offset		= 0,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_ESR_TIMER_CHG_INIT] = {
+		.address	= 18,
+		.offset		= 2,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_ESR_PULSE_THR] = {
+		.address	= 2,
 		.offset		= 3,
 		.length		= 1,
+		.numrtr		= 100000,
+		.denmtr		= 390625,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_ESR_TIGHT_FILTER] = {
+		.address	= 8,
+		.offset		= 0,
+		.length		= 1,
+		.numrtr		= 512,
+		.denmtr		= 1000000,
+		.encode		= fg_encode_default
+	},
+	[FG_SETTING_ESR_BROAD_FILTER] = {
+		.address	= 8,
+		.offset		= 1,
+		.length		= 1,
+		.numrtr		= 512,
+		.denmtr		= 1000000,
+		.encode		= fg_encode_default
+	},
+	[FG_SETTING_KI_COEFF_LOW_DISCHG] = {
+		.address	= 10,
+		.offset		= 2,
+		.length		= 1,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_KI_COEFF_MED_DISCHG] = {
+		.address	= 9,
+		.length		= 1,
+		.offset		= 3,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_KI_COEFF_HI_DISCHG] = {
+		.address	= 10,
+		.length		= 1,
+		.offset		= 0,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_KI_COEFF_FULL_SOC] = {
+		.address	= 12,
+		.length		= 1,
+		.offset		= 2,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
 		.encode		= fg_encode_default,
 	},
 };
@@ -600,6 +653,12 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.numrtr		= 1,
 		.denmtr		= 1,
 		.decode		= fg_decode_cc_soc_pmi8998,
+	},
+	[FG_DATA_ACT_CAP] = {
+		.address	= 117,
+		.offset		= 0,
+		.length		= 2,
+		.decode		= fg_decode_default,
 	},
 	[FG_DATA_NOM_CAP] = {
 		.address	= 74,
@@ -741,45 +800,108 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.offset		= 0,
 		.length		= 1,
 	},
-	[FG_SETTING_BATT_COOL_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x63,
+	[FG_SETTING_ESR_TIMER_DISCHG_MAX] = {
+		.address	= 17,
 		.offset		= 0,
-		.length		= 1,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
 		.encode		= fg_encode_default,
 	},
-	[FG_SETTING_BATT_WARM_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x64,
-		.offset		= 1,
-		.length		= 1,
-		.encode		= fg_encode_default,
-	},
-	[FG_SETTING_BATT_COLD_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x62,
+	[FG_SETTING_ESR_TIMER_DISCHG_INIT] = {
+		.address	= 17,
 		.offset		= 2,
-		.length		= 1,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
 		.encode		= fg_encode_default,
 	},
-	[FG_SETTING_BATT_HOT_TEMP] = {
-		.type		= BATT_BASE_PARAM,
-		.address	= 0x65,
+	[FG_SETTING_ESR_TIMER_CHG_MAX] = {
+		.address	= 18,
+		.offset		= 0,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_ESR_TIMER_CHG_INIT] = {
+		.address	= 18,
+		.offset		= 2,
+		.length		= 2,
+		.numrtr		= 1,
+		.denmtr		= 1,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_ESR_PULSE_THR] = {
+		.address	= 2,
 		.offset		= 3,
 		.length		= 1,
+		.numrtr		= 100000,
+		.denmtr		= 390625,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_ESR_TIGHT_FILTER] = {
+		.address	= 8,
+		.offset		= 0,
+		.length		= 1,
+		.numrtr		= 512,
+		.denmtr		= 1000000,
+		.encode		= fg_encode_default
+	},
+	[FG_SETTING_ESR_BROAD_FILTER] = {
+		.address	= 8,
+		.offset		= 1,
+		.length		= 1,
+		.numrtr		= 512,
+		.denmtr		= 1000000,
+		.encode		= fg_encode_default
+	},
+	[FG_SETTING_KI_COEFF_LOW_DISCHG] = {
+		.address	= 9,
+		.offset		= 3,
+		.length		= 1,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_KI_COEFF_MED_DISCHG] = {
+		.address	= 10,
+		.length		= 1,
+		.offset		= 0,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_KI_COEFF_HI_DISCHG] = {
+		.address	= 10,
+		.length		= 1,
+		.offset		= 1,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
+		.encode		= fg_encode_default,
+	},
+	[FG_SETTING_KI_COEFF_FULL_SOC] = {
+		.address	= 12,
+		.length		= 1,
+		.offset		= 2,
+		.numrtr		= 1000,
+		.denmtr		= 244141,
 		.encode		= fg_encode_default,
 	},
 };
 
-struct fg_learning_data {
-	struct mutex	learning_lock;
+struct fg_capacity_learning_data {
+	struct mutex	lock;
 	bool		active;
-	int64_t		cc_uah;
+	int		init_cc_uah;
+	int		nom_cap_uah;
+	int		init_cc_soc_sw;
+	int		final_cc_uah;
 	int		learned_cc_uah;
-	int		init_cc_pc_val;
+	/*params*/
 	int		max_start_soc;
-	int		max_increment;
-	int		max_decrement;
+	int		max_cap_inc;
+	int		max_cap_dec;
 	int		vbat_est_thr_uv;
 	int		max_cap_limit;
 	int		min_cap_limit;
@@ -844,6 +966,8 @@ enum esr_timer_config {
 	NUM_ESR_TIMERS,
 };
 
+#define KI_COEFF_MAX			62200
+#define KI_COEFF_SOC_LEVELS		3
 struct fg_dt_props {
 	int term_current_ma;
 	int chg_term_current_ma;
@@ -867,9 +991,21 @@ struct fg_dt_props {
 	int esr_timer_shutdown[NUM_ESR_TIMERS];
 	int esr_tight_flt_upct;
 	int esr_broad_flt_upct;
+	int esr_tight_lt_flt_upct;
+	int esr_broad_lt_flt_upct;
+	int esr_tight_rt_flt_upct;
+	int esr_broad_rt_flt_upct;
+	int esr_flt_switch_temp;
 	int esr_pulse_thresh_ma;
 	int esr_meas_curr_ma;
+	int esr_clamp_mohms;
 	int vbatt_est_diff;
+	int ki_coeff_full_soc_dischg;
+	int ki_coeff_hi_chg;
+	int ki_coeff_soc[KI_COEFF_SOC_LEVELS];
+	int ki_coeff_low_dischg[KI_COEFF_SOC_LEVELS];
+	int ki_coeff_med_dischg[KI_COEFF_SOC_LEVELS];
+	int ki_coeff_hi_dischg[KI_COEFF_SOC_LEVELS];
 };
 
 struct fg_chip {
@@ -878,6 +1014,10 @@ struct fg_chip {
 	struct mutex lock;
 
 	struct power_supply *bms_psy;
+	struct power_supply *batt_psy;
+	struct power_supply *parallel_psy;
+	struct power_supply *usb_psy;
+	struct power_supply *dc_psy;
 
 	u8 revision[4];
 	enum pmic pmic_version;
@@ -895,11 +1035,15 @@ struct fg_chip {
 	struct fg_dt_props dt;
 	struct fg_iadc_comp_data iadc_comp_data;
 
-	struct fg_learning_data learning_data;
+	struct fg_capacity_learning_data cl;
 	struct fg_rslow_data rslow_comp;
 	int health;
 	int status;
+	int charge_status;
+	int prev_charge_status;
 	int vbatt_est_diff;
+	int ki_coeff_full_soc;
+	int esr_flt_sts;
 
 	//board specific init fn
 	int irqs[FG_IRQS_MAX];
@@ -908,10 +1052,18 @@ struct fg_chip {
 	struct work_struct cycle_count_work;
 
 	bool irqs_enabled;
-
 	bool full_soc_irq_enabled;
 	bool vbat_low_irq_enabled;
 	bool power_supply_registered;
+	bool charge_done;
+	bool esr_fcc_ctrl_en;
+	bool ki_coeff_dischg_en;
+	bool batt_missing;
+	bool input_present;
+	bool otg_present;
+	bool first_profile_loaded;
+	bool fg_restarting;
+	bool soc_reporting_ready;
 
 	struct completion first_soc_done;
 	struct completion sram_access_granted;
@@ -923,7 +1075,6 @@ struct fg_chip {
 
 static int fg_read(struct fg_chip *chip, u8 *val, u16 addr, int len);
 static bool fg_check_sram_access(struct fg_chip *chip);
-static void fg_cap_learning_post_process(struct fg_chip *chip);
 static irqreturn_t fg_soc_irq_handler(int irq, void *_chip)
 {
 	struct fg_chip *chip = _chip;
@@ -1378,16 +1529,6 @@ static void fg_encode_float(struct fg_sram_param sp, int val, u8 *buf)
 static void fg_encode_bcl(struct fg_sram_param sp, int val, u8 *buf)
 {
 	buf[0] = val * sp.numrtr / sp.denmtr;
-}
-
-static void fg_encode_therm_delay(struct fg_sram_param sp, int val, u8 *buf)
-{
-	if (val < 2560)
-		buf[0] = 0;
-	else if (val > 163840)
-		buf[0] = 7;
-	else
-		buf[0] = ilog2(val / 10) - 7;
 }
 
 static void fg_encode_adc(struct fg_sram_param sp, int val, u8 *buf)
@@ -2522,14 +2663,8 @@ static int fg_sram_masked_write(struct fg_chip *chip, u16 addr,
 	return rc;
 }
 
-static int fg_sram_masked_write_param(struct fg_chip *chip,
-		enum fg_sram_param_id id, u8 mask, u8 val)
-{
-	struct fg_sram_param param = chip->param[id];
-
-	return fg_sram_masked_write(chip, param.address, mask, val, param.offset);
-}
-
+#define FULL_CAPACITY	100
+#define FULL_SOC_RAW	255
 static int fg_get_capacity(struct fg_chip *chip, int *val)
 {
 	u8 cap[2];
@@ -2541,7 +2676,8 @@ static int fg_get_capacity(struct fg_chip *chip, int *val)
 		dev_warn(chip->dev, "cap not same\n");
 		cap[0] = cap[0] < cap[1] ? cap[0] : cap[1];
 	}
-	*val = DIV_ROUND_CLOSEST((cap[0] - 1) * 98, 0xff - 2) + 1;
+
+	*val = DIV_ROUND_CLOSEST(cap[0] * FULL_CAPACITY, FULL_SOC_RAW);
 	return 0;
 }
 
@@ -3362,6 +3498,75 @@ done:
 	return rc;
 }
 
+static int fg_parse_ki_coefficients(struct fg_chip *chip)
+{
+	struct device_node *node = chip->dev->of_node;
+	int rc, i, temp;
+
+	rc = of_property_read_u32(node, "qcom,ki-coeff-full-dischg", &temp);
+	if (!rc)
+		chip->dt.ki_coeff_full_soc_dischg = temp;
+
+	chip->dt.ki_coeff_hi_chg = -EINVAL;
+	rc = of_property_read_u32(node, "qcom,ki-coeff-hi-chg", &temp);
+	if (!rc)
+		chip->dt.ki_coeff_hi_chg = temp;
+
+	if (!of_find_property(node, "qcom,ki-coeff-soc-dischg", NULL) ||
+		(!of_find_property(node, "qcom,ki-coeff-low-dischg", NULL) &&
+		 !of_find_property(node, "qcom,ki-coeff-med-dischg", NULL) &&
+		 !of_find_property(node, "qcom,ki-coeff-hi-dischg", NULL)))
+		return 0;
+
+	rc = of_property_read_u32_array(node, "qcom,ki-coeff-soc-dischg",
+			chip->dt.ki_coeff_soc, KI_COEFF_SOC_LEVELS);
+	if (rc < 0)
+		return rc;
+
+	rc = of_property_read_u32_array(node, "qcom,ki-coeff-low-dischg",
+			chip->dt.ki_coeff_low_dischg, KI_COEFF_SOC_LEVELS);
+	if (rc < 0)
+		return rc;
+
+	rc = of_property_read_u32_array(node, "qcom,ki-coeff-med-dischg",
+			chip->dt.ki_coeff_med_dischg, KI_COEFF_SOC_LEVELS);
+	if (rc < 0)
+		return rc;
+
+	rc = of_property_read_u32_array(node, "qcom,ki-coeff-hi-dischg",
+			chip->dt.ki_coeff_hi_dischg, KI_COEFF_SOC_LEVELS);
+	if (rc < 0)
+		return rc;
+
+	for (i = 0; i < KI_COEFF_SOC_LEVELS; i++) {
+		if (chip->dt.ki_coeff_soc[i] < 0 ||
+			chip->dt.ki_coeff_soc[i] > FULL_CAPACITY) {
+			dev_err(chip->dev, "invalid ki_coeff_soc_dischg\n");
+			return -EINVAL;
+		}
+
+		if (chip->dt.ki_coeff_low_dischg[i] < 0 ||
+				chip->dt.ki_coeff_low_dischg[i] > KI_COEFF_MAX) {
+			pr_err("invalid ki_coeff_low_dischg values\n");
+			return -EINVAL;
+		}
+
+		if (chip->dt.ki_coeff_med_dischg[i] < 0 ||
+				chip->dt.ki_coeff_med_dischg[i] > KI_COEFF_MAX) {
+			pr_err("invalid ki_coeff_med_dischg values\n");
+			return -EINVAL;
+		}
+
+		if (chip->dt.ki_coeff_hi_dischg[i] < 0 ||
+				chip->dt.ki_coeff_hi_dischg[i] > KI_COEFF_MAX) {
+			pr_err("invalid ki_coeff_hi_dischg values\n");
+			return -EINVAL;
+		}
+	}
+	chip->ki_coeff_dischg_en = true;
+	return 0;
+}
+
 static int fg_of_init(struct fg_chip *chip)
 {
 	int rc;
@@ -3404,9 +3609,24 @@ static int fg_of_init(struct fg_chip *chip)
 	chip->dt.esr_tight_flt_upct = 3907;
 	chip->dt.esr_broad_flt_upct = 99610;
 	chip->dt.esr_meas_curr_ma = 120;
+	chip->dt.esr_clamp_mohms = 20;
+	chip->dt.esr_tight_lt_flt_upct = 30000;
+	chip->dt.esr_broad_lt_flt_upct = 30000;
+	chip->dt.esr_tight_rt_flt_upct = 5860;
+	chip->dt.esr_broad_rt_flt_upct = 156250;
+	chip->dt.esr_flt_switch_temp = 100;
+	chip->cl.max_temp = 450;
+	chip->cl.min_temp = 150;
+	chip->cl.max_start_soc = 15;
+	chip->cl.max_cap_inc = 5;
+	chip->cl.max_cap_dec = 100;
+	chip->cl.vbat_est_thr_uv = 40000;
 
 	of_property_read_u32(chip->dev->of_node,
 		"qcom,term-current-ma", &chip->dt.term_current_ma);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,chg-term-base-current-ma", &chip->dt.chg_term_base_current_ma);
 
 	of_property_read_u32(chip->dev->of_node,
 		"qcom,chg-term-current-ma", &chip->dt.term_current_ma);
@@ -3419,6 +3639,9 @@ static int fg_of_init(struct fg_chip *chip)
 
 	of_property_read_u32(chip->dev->of_node,
 		"qcom,recharge-thr", &chip->dt.recharge_thr);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,recharge-volt-thr-mv", &chip->dt.recharge_volt_thr_mv);
 
 	of_property_read_u32(chip->dev->of_node,
 		"qcom,bcl-lm-thr-ma", &chip->dt.bcl_lm_ma);
@@ -3471,6 +3694,10 @@ static int fg_of_init(struct fg_chip *chip)
 	if (rc)
 		chip->batt_info.rconn_mohm = 1;
 
+	rc = fg_parse_ki_coefficients(chip);
+	if (rc)
+		dev_err(chip->dev, "failed to parse ki coeffs: %d\n", rc);
+
 	return 0;
 }
 
@@ -3507,17 +3734,11 @@ static bool fg_is_temperature_ok_for_learning(struct fg_chip *chip)
 	int batt_temp;
 	fg_get_param(chip, FG_DATA_BATT_TEMP, &batt_temp);
 
-	if (batt_temp > chip->learning_data.max_temp
-			|| batt_temp < chip->learning_data.min_temp)
+	if (batt_temp > chip->cl.max_temp
+			|| batt_temp < chip->cl.min_temp)
 		return false;
 
 	return true;
-}
-
-static void fg_cap_learning_stop(struct fg_chip *chip)
-{
-	chip->learning_data.cc_uah = 0;
-	chip->learning_data.active = false;
 }
 
 #define BATT_MISSING_STS BIT(6)
@@ -3537,53 +3758,33 @@ static bool is_battery_missing(struct fg_chip *chip)
 	return (fg_batt_sts & BATT_MISSING_STS) ? true : false;
 }
 
-static int fg_cap_learning_process_full_data(struct fg_chip *chip)
+static bool is_usb_present(struct fg_chip *chip)
 {
-	int cc_pc_val, rc = -EINVAL;
-	unsigned int cc_soc_delta_pc;
-	int64_t delta_cc_uah;
-	uint64_t temp;
-	bool batt_missing = is_battery_missing(chip);
+	union power_supply_propval prop = {0,};
+	if (!chip->usb_psy)
+		chip->usb_psy = power_supply_get_by_name("usb");
 
-	if (batt_missing) {
-		pr_err("Battery is missing!\n");
-		goto fail;
-	}
+	if (chip->usb_psy)
+		power_supply_get_property(chip->usb_psy,
+				POWER_SUPPLY_PROP_PRESENT, &prop);
+	return prop.intval != 0;
+}
 
-	if (!chip->learning_data.active)
-		goto fail;
+static bool is_dc_present(struct fg_chip *chip)
+{
+	union power_supply_propval prop = {0,};
+	if (!chip->dc_psy)
+		chip->dc_psy = power_supply_get_by_name("dc");
 
-	if (!fg_is_temperature_ok_for_learning(chip)) {
-		fg_cap_learning_stop(chip);
-		goto fail;
-	}
+	if (chip->dc_psy)
+		power_supply_get_property(chip->dc_psy,
+				POWER_SUPPLY_PROP_PRESENT, &prop);
+	return prop.intval != 0;
+}
 
-	rc = fg_get_param(chip, FG_DATA_CHARGE_COUNTER, &cc_pc_val);
-	if (rc) {
-		pr_err("failed to get CC_SOC, stopping capacity learning\n");
-		fg_cap_learning_stop(chip);
-		goto fail;
-	}
-
-	temp = abs(cc_pc_val - chip->learning_data.init_cc_pc_val);
-	cc_soc_delta_pc = DIV_ROUND_CLOSEST_ULL(temp * 100, FULL_PERCENT_28BIT);
-
-	delta_cc_uah = div64_s64(
-			chip->batt_info.nom_cap_uah * cc_soc_delta_pc,
-			100);
-	chip->learning_data.cc_uah = delta_cc_uah + chip->learning_data.cc_uah;
-
-	pr_info("current cc_soc=%d cc_soc_pc=%d init_cc_pc_val=%d delta_cc_uah=%lld learned_cc_uah=%d total_cc_uah = %lld\n",
-		cc_pc_val, cc_soc_delta_pc,
-		chip->learning_data.init_cc_pc_val,
-		delta_cc_uah,
-		chip->learning_data.learned_cc_uah,
-		chip->learning_data.cc_uah);
-
-	return 0;
-
-fail:
-	return rc;
+static bool is_input_present(struct fg_chip *chip)
+{
+	return is_usb_present(chip) || is_dc_present(chip);
 }
 
 #define PMI8950_MAH_TO_SOC_CONV_REG	0x4a0
@@ -3615,6 +3816,301 @@ static int fg_calc_and_store_cc_soc_coeff(struct fg_chip *chip, int16_t cc_mah)
 				rc);
 	}
 	return rc;
+}
+
+#define ACT_BATT_CAP_REG	74
+#define ACT_BATT_CAP_LEN	2
+#define ACT_BATT_CAP_OFF	0
+static int fg_save_learned_cap_to_sram(struct fg_chip *chip)
+{
+	int16_t cc_mah;
+	int rc;
+
+	if (!chip->cl.learned_cc_uah)
+		return -EPERM;
+
+	cc_mah = div64_s64(chip->cl.learned_cc_uah, 1000);
+	/* Write to actual capacity register for coulomb counter operation */
+	rc = fg_set_param(chip, FG_DATA_ACT_CAP, (u8 *)&cc_mah);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to write act_batt_cap: %d\n", rc);
+		return rc;
+	}
+
+	switch (chip->pmic_version) {
+	case PMI8950:
+		/* store charge coefficients */
+		rc = fg_calc_and_store_cc_soc_coeff(chip, cc_mah);
+		break;
+	case PMI8998_V1:
+	case PMI8998_V2:
+		/* Write to a backup register to use across reboot */
+		rc = fg_sram_write(chip, (u8 *)&cc_mah, ACT_BATT_CAP_REG,
+				ACT_BATT_CAP_LEN, ACT_BATT_CAP_OFF, false);
+	}
+
+	if (rc)
+		dev_err(chip->dev, "failed to write learned cap: %d\n", rc);
+
+	return rc;
+}
+
+#define CAPACITY_DELTA_DECIPCT	500
+static int fg_load_learned_cap_from_sram(struct fg_chip *chip)
+{
+	int rc, act_cap_mah;
+	int64_t delta_cc_uah, pct_nom_cap_uah;
+
+	rc = fg_get_param(chip, FG_DATA_ACT_CAP, &act_cap_mah);
+	if (rc < 0) {
+		pr_err("Error in getting ACT_BATT_CAP, rc=%d\n", rc);
+		return rc;
+	}
+
+	chip->cl.learned_cc_uah = act_cap_mah * 1000;
+
+	if (chip->cl.learned_cc_uah != chip->cl.nom_cap_uah) {
+		if (chip->cl.learned_cc_uah == 0)
+			chip->cl.learned_cc_uah = chip->cl.nom_cap_uah;
+
+		delta_cc_uah = abs(chip->cl.learned_cc_uah -
+					chip->cl.nom_cap_uah);
+		pct_nom_cap_uah = div64_s64((int64_t)chip->cl.nom_cap_uah *
+				CAPACITY_DELTA_DECIPCT, 1000);
+		/*
+		 * If the learned capacity is out of range by 50% from the
+		 * nominal capacity, then overwrite the learned capacity with
+		 * the nominal capacity.
+		 */
+		if (chip->cl.nom_cap_uah && delta_cc_uah > pct_nom_cap_uah)
+			chip->cl.learned_cc_uah = chip->cl.nom_cap_uah;
+
+		rc = fg_save_learned_cap_to_sram(chip);
+		if (rc < 0)
+			pr_err("Error in saving learned_cc_uah, rc=%d\n", rc);
+	}
+
+	return 0;
+}
+
+#define FULL_CAPACITY	100
+#define FULL_SOC_RAW	255
+#define BATT_SOC_32BIT	GENMASK(31, 0)
+#define CC_SOC_30BIT	GENMASK(29, 0)
+#define CC_SOC_30BIT	GENMASK(29, 0)
+static int fg_cap_learning_begin(struct fg_chip *chip, u32 batt_soc)
+{
+	int rc, cc_soc_sw, batt_soc_msb;
+
+	batt_soc_msb = batt_soc >> 24;
+	if (DIV_ROUND_CLOSEST(batt_soc_msb * 100, FULL_SOC_RAW) >
+		chip->cl.max_start_soc) {
+		return -EINVAL;
+	}
+
+	chip->cl.init_cc_uah = div64_s64(chip->cl.learned_cc_uah * batt_soc_msb,
+					FULL_SOC_RAW);
+
+	/* Prime cc_soc_sw with battery SOC when capacity learning begins */
+	cc_soc_sw = div64_s64((int64_t)batt_soc * CC_SOC_30BIT,
+				BATT_SOC_32BIT);
+	rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, (u8 *)&cc_soc_sw);
+	if (rc) {
+		dev_err(chip->dev, "failed to write cc_soc_sw: %d\n", rc);
+		return rc;
+	}
+
+	chip->cl.init_cc_soc_sw = cc_soc_sw;
+	return rc;
+}
+
+static int fg_cap_learning_process_full_data(struct fg_chip *chip)
+{
+	int rc, cc_soc_sw, cc_soc_delta_pct;
+	int64_t delta_cc_uah;
+
+	rc = fg_get_param(chip, FG_DATA_CHARGE_COUNTER, &cc_soc_sw);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to get CC_SOC_SW: %d\n", rc);
+		return rc;
+	}
+
+	cc_soc_delta_pct =
+		div64_s64((int64_t)(cc_soc_sw - chip->cl.init_cc_soc_sw) * 100,
+			CC_SOC_30BIT);
+
+	/* If the delta is < 50%, then skip processing full data */
+	if (cc_soc_delta_pct < 50) {
+		dev_err(chip->dev, "cc_soc_delta_pct: %d\n", cc_soc_delta_pct);
+		return -ERANGE;
+	}
+
+	delta_cc_uah = div64_s64(chip->cl.learned_cc_uah * cc_soc_delta_pct,
+				100);
+	chip->cl.final_cc_uah = chip->cl.init_cc_uah + delta_cc_uah;
+	return 0;
+}
+
+static void fg_cap_learning_post_process(struct fg_chip *chip)
+{
+	int64_t max_inc_val, min_dec_val, old_cap;
+	int rc;
+
+	if (chip->pmic_version != PMI8950)
+		dev_warn(chip->dev, "QNOVO is not supported\n");
+
+	max_inc_val = chip->cl.learned_cc_uah
+			* (1000 + chip->cl.max_cap_inc);
+	do_div(max_inc_val, 1000);
+
+	min_dec_val = chip->cl.learned_cc_uah
+			* (1000 - chip->cl.max_cap_dec);
+	do_div(min_dec_val, 1000);
+
+	old_cap = chip->cl.learned_cc_uah;
+	if (chip->cl.final_cc_uah > max_inc_val)
+		chip->cl.learned_cc_uah = max_inc_val;
+	else if (chip->cl.final_cc_uah < min_dec_val)
+		chip->cl.learned_cc_uah = min_dec_val;
+	else
+		chip->cl.learned_cc_uah =
+			chip->cl.final_cc_uah;
+
+	if (chip->cl.max_cap_limit) {
+		max_inc_val = (int64_t)chip->cl.nom_cap_uah * (1000 +
+				chip->cl.max_cap_limit);
+		do_div(max_inc_val, 1000);
+		if (chip->cl.final_cc_uah > max_inc_val)
+			chip->cl.learned_cc_uah = max_inc_val;
+	}
+
+	if (chip->cl.min_cap_limit) {
+		min_dec_val = (int64_t)chip->cl.nom_cap_uah * (1000 -
+				chip->cl.min_cap_limit);
+		do_div(min_dec_val, 1000);
+		if (chip->cl.final_cc_uah < min_dec_val)
+			chip->cl.learned_cc_uah = min_dec_val;
+	}
+
+	rc = fg_save_learned_cap_to_sram(chip);
+	if (rc < 0)
+		pr_err("Error in saving learned_cc_uah, rc=%d\n", rc);
+}
+
+static int fg_cap_learning_done(struct fg_chip *chip)
+{
+	int rc, cc_soc_sw;
+
+	rc = fg_cap_learning_process_full_data(chip);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to process cap learning data: %d\n",
+			rc);
+		return rc;
+	}
+
+	/* Write a FULL value to cc_soc_sw */
+	cc_soc_sw = CC_SOC_30BIT;
+	rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, (u8 *)&cc_soc_sw);
+	if (rc) {
+		dev_err(chip->dev, "failed to write cc_soc_sw: %d\n", rc);
+		return rc;
+	}
+
+	fg_cap_learning_post_process(chip);
+	return rc;
+}
+
+static void fg_cap_learning_update(struct fg_chip *chip)
+{
+	int rc, batt_soc, batt_soc_msb, cc_soc_sw;
+	bool input_present = is_input_present(chip);
+	bool prime_cc = false;
+
+	if (!fg_is_temperature_ok_for_learning(chip) ||
+			!chip->cl.learned_cc_uah) {
+		chip->cl.active = false;
+		chip->cl.init_cc_uah = 0;
+		goto out;
+	}
+
+	if (chip->charge_status == chip->prev_charge_status)
+		goto out;
+
+	rc = fg_get_param(chip, FG_DATA_BATT_SOC, &batt_soc);
+	if (rc < 0) {
+		pr_err("Error in getting ACT_BATT_CAP, rc=%d\n", rc);
+		goto out;
+	}
+
+	batt_soc_msb = (u32)batt_soc >> 24;
+
+	/* Initialize the starting point of learning capacity */
+	if (!chip->cl.active) {
+		if (chip->charge_status == POWER_SUPPLY_STATUS_CHARGING) {
+			rc = fg_cap_learning_begin(chip, batt_soc);
+			chip->cl.active = (rc == 0);
+		} else {
+			if ((chip->charge_status ==
+					POWER_SUPPLY_STATUS_DISCHARGING) ||
+					chip->charge_done)
+				prime_cc = true;
+		}
+	} else {
+		if (chip->charge_done) {
+			rc = fg_cap_learning_done(chip);
+			if (rc < 0)
+				dev_err(chip->dev, "failed to complete"\
+						" capacity learning: %d\n", rc);
+
+			chip->cl.active = false;
+			chip->cl.init_cc_uah = 0;
+		}
+
+		if (chip->charge_status == POWER_SUPPLY_STATUS_DISCHARGING) {
+			if (!input_present) {
+				chip->cl.active = false;
+				chip->cl.init_cc_uah = 0;
+				prime_cc = true;
+			}
+		}
+
+		if (chip->charge_status == POWER_SUPPLY_STATUS_NOT_CHARGING) {
+			if (input_present) {
+				/*
+				 * Don't abort the capacity learning when qnovo
+				 * is enabled and input is present where the
+				 * charging status can go to "not charging"
+				 * intermittently.
+				 * TODO:
+				 * check for QNOVO
+				 */
+			} else {
+				chip->cl.active = false;
+				chip->cl.init_cc_uah = 0;
+				prime_cc = true;
+			}
+		}
+	}
+
+	/*
+	 * Prime CC_SOC_SW when the device is not charging or during charge
+	 * termination when the capacity learning is not active.
+	 */
+
+	if (prime_cc) {
+		if (chip->charge_done)
+			cc_soc_sw = CC_SOC_30BIT;
+		else
+			cc_soc_sw = div_u64((u32)batt_soc *
+					CC_SOC_30BIT, BATT_SOC_32BIT);
+
+		rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, (u8 *)&cc_soc_sw);
+		if (rc < 0)
+			dev_err(chip->dev, "failed to write cc_soc_sw: %d\n", rc);
+	}
+
+out:
+	mutex_unlock(&chip->cl.lock);
 }
 
 static void update_cycle_count(struct work_struct *work)
@@ -3682,161 +4178,6 @@ out:
 #endif
 }
 
-#define FG_PMI8950_ACT_CAP_REG	0x5e4
-#define FG_PMI8998_ACT_CAP_REG	117
-static void fg_cap_learning_save_data(struct fg_chip *chip)
-{
-	int16_t cc_mah;
-	int rc;
-	bool batt_missing = is_battery_missing(chip);
-
-	if (batt_missing) {
-		pr_err("Battery is missing!\n");
-		return;
-	}
-
-	cc_mah = div64_s64(chip->learning_data.learned_cc_uah, 1000);
-
-	switch (chip->pmic_version) {
-	case PMI8950:
-		rc = fg_sram_write(chip, (u8 *)&cc_mah, FG_PMI8950_ACT_CAP_REG,
-				2, 0, false);
-		break;
-	case PMI8998_V1:
-	case PMI8998_V2:
-		rc = fg_sram_write(chip, (u8 *)&cc_mah, FG_PMI8998_ACT_CAP_REG,
-				2, 0, false);
-		break;
-	}
-	if (rc)
-		pr_err("Failed to store aged capacity: %d\n", rc);
-
-	rc = fg_calc_and_store_cc_soc_coeff(chip, cc_mah);
-	if (rc)
-		pr_err("Error in storing cc_soc_coeff, rc:%d\n", rc);
-}
-
-static void fg_cap_learning_post_process(struct fg_chip *chip)
-{
-	int64_t max_inc_val, min_dec_val, old_cap;
-	bool batt_missing = is_battery_missing(chip);
-
-	if (batt_missing) {
-		pr_err("Battery is missing!\n");
-		return;
-	}
-
-	max_inc_val = (int64_t)chip->batt_info.nom_cap_uah
-			* (1000 + chip->learning_data.max_increment);
-	do_div(max_inc_val, 1000);
-
-	min_dec_val = (int64_t)chip->learning_data.learned_cc_uah
-			* (1000 - chip->learning_data.max_decrement);
-	do_div(min_dec_val, 1000);
-
-	old_cap = chip->learning_data.learned_cc_uah;
-	if (chip->learning_data.cc_uah > max_inc_val)
-		chip->learning_data.learned_cc_uah = max_inc_val;
-	else if (chip->learning_data.cc_uah < min_dec_val)
-		chip->learning_data.learned_cc_uah = min_dec_val;
-	else
-		chip->learning_data.learned_cc_uah =
-			chip->learning_data.cc_uah;
-
-	if (chip->learning_data.max_cap_limit) {
-		max_inc_val = (int64_t)chip->batt_info.nom_cap_uah * (1000 +
-				chip->learning_data.max_cap_limit);
-		do_div(max_inc_val, 1000);
-		if (chip->learning_data.cc_uah > max_inc_val)
-			chip->learning_data.learned_cc_uah = max_inc_val;
-	}
-
-	if (chip->learning_data.min_cap_limit) {
-		min_dec_val = (int64_t)chip->batt_info.nom_cap_uah * (1000 -
-				chip->learning_data.min_cap_limit);
-		do_div(min_dec_val, 1000);
-		if (chip->learning_data.cc_uah < min_dec_val)
-			chip->learning_data.learned_cc_uah = min_dec_val;
-	}
-
-	fg_cap_learning_save_data(chip);
-	pr_info("final cc_uah = %lld, learned capacity %lld -> %d uah\n",
-		chip->learning_data.cc_uah,
-		old_cap, chip->learning_data.learned_cc_uah);
-}
-
-static int fg_cap_learning_check(struct fg_chip *chip)
-{
-	int rc = 0, battery_soc, cc_pc_val;
-	unsigned int cc_pc_100 = FULL_PERCENT_28BIT;
-	u8 buf[4];
-
-	mutex_lock(&chip->learning_data.learning_lock);
-	if (chip->status == POWER_SUPPLY_STATUS_CHARGING
-				&& !chip->learning_data.active) {
-		if (chip->learning_data.learned_cc_uah == 0)
-			goto fail;
-
-		if (!fg_is_temperature_ok_for_learning(chip))
-			goto fail;
-
-		rc = fg_get_param(chip, FG_DATA_BATT_SOC, &battery_soc);
-		/* check if the battery is low enough to start soc learning */
-		if (battery_soc * 100 / PMI8950_FULL_PERCENT_3B
-				> chip->learning_data.max_start_soc) {
-			fg_cap_learning_stop(chip);
-			goto fail;
-		}
-
-		/* set the coulomb counter to a percentage of the capacity */
-		chip->learning_data.cc_uah = div64_s64(
-			(chip->learning_data.learned_cc_uah * battery_soc),
-				PMI8950_FULL_PERCENT_3B);
-
-		/* SW_CC_SOC based capacity learning */
-		rc = fg_get_param(chip, FG_DATA_CHARGE_COUNTER, &cc_pc_val);
-		if (rc) {
-			pr_err("failed to get CC_SOC, stop capacity learning\n");
-			fg_cap_learning_stop(chip);
-			goto fail;
-		}
-
-		chip->learning_data.init_cc_pc_val = cc_pc_val;
-		chip->learning_data.active = true;
-		pr_info("SW_CC_SOC based learning init_CC_SOC=%d\n",
-				chip->learning_data.init_cc_pc_val);
-	} else if ((chip->status != POWER_SUPPLY_STATUS_CHARGING)
-				&& chip->learning_data.active) {
-
-		if (chip->status == POWER_SUPPLY_STATUS_FULL) {
-			rc = fg_cap_learning_process_full_data(chip);
-			if (rc) {
-				fg_cap_learning_stop(chip);
-				goto fail;
-			}
-			/* reset SW_CC_SOC register to 100% */
-			fg_encode(chip->param[FG_DATA_CHARGE_COUNTER],
-					cc_pc_100, buf);
-			rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, buf);
-			if (rc)
-				pr_err("Failed to reset CC_SOC_REG rc=%d\n", rc);
-			fg_cap_learning_post_process(chip);
-		}
-
-		fg_cap_learning_stop(chip);
-	} else if (chip->status == POWER_SUPPLY_STATUS_FULL) {
-		/* reset SW_CC_SOC register to 100% upon charge_full */
-		fg_encode(chip->param[FG_DATA_CHARGE_COUNTER], cc_pc_100, buf);
-		rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, buf);
-		if (rc)
-			pr_err("Failed to reset CC_SOC_REG rc=%d\n", rc);
-	}
-
-fail:
-	mutex_unlock(&chip->learning_data.learning_lock);
-	return rc;
-}
-
 static int fg_vbat_est_check(struct fg_chip *chip)
 {
 	int rc = 0;
@@ -3852,7 +4193,7 @@ static int fg_vbat_est_check(struct fg_chip *chip)
 		return rc;
 
 	rc = get_vbat_est_diff(chip, &vbat_est_diff);
-	vbat_est_thr_uv = chip->learning_data.vbat_est_thr_uv;
+	vbat_est_thr_uv = chip->cl.vbat_est_thr_uv;
 	pr_info("vbat(%d),est-vbat(%d),diff(%d),threshold(%d)\n",
 			voltage, pred_voltage,
 			vbat_est_diff, vbat_est_thr_uv);
@@ -3910,7 +4251,6 @@ static void fg_status_change_work(struct work_struct *work)
 			chip->full_soc_irq_enabled = false;
 		}
 	}
-	fg_cap_learning_check(chip);
 	fg_vbat_est_check(chip);
 	//TODO:schedule_work(&chip->update_esr_work);
 
@@ -4083,10 +4423,10 @@ static int fg_get_property(struct power_supply *psy,
 		val->intval = chip->batt_info.nom_cap_uah;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		val->intval = chip->learning_data.learned_cc_uah;
+		val->intval = chip->cl.learned_cc_uah;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
-		val->intval = chip->learning_data.cc_uah;
+		val->intval = chip->cl.init_cc_uah;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
 		val->intval = chip->dt.chg_term_current_ma * 1000;
@@ -4155,7 +4495,7 @@ static int fg_probe(struct platform_device *pdev)
 
 	chip->dev = &pdev->dev;
 	mutex_init(&chip->lock);
-	mutex_init(&chip->learning_data.learning_lock);
+	mutex_init(&chip->cl.lock);
 	INIT_WORK(&chip->status_change_work, fg_status_change_work);
 	INIT_WORK(&chip->cycle_count_work, update_cycle_count);
 	init_completion(&chip->first_soc_done);
