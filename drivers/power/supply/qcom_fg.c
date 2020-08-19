@@ -195,7 +195,7 @@ static void fg_encode_default(struct fg_sram_param sp, int val, u8 *buf);
 
 #define PMI8950_LSB_16B_NUMRTR	1000
 #define PMI8950_LSB_16B_DENMTR	152587
-#define PMI8950_FULL_PERCENT_3B	0xffffff
+#define FULL_PERCENT_3B		0xffffff
 #define MICRO_UNIT		1000000ULL
 
 #define FG_SRAM_PARAM_DEF(_name, addr, off, len, num, den, val_off,\
@@ -214,7 +214,7 @@ static void fg_encode_default(struct fg_sram_param sp, int val, u8 *buf);
 static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 	FG_SRAM_PARAM_DEF(DATA_BATT_TEMP, 0x550, 2, 2, 1000, 625, -2730, NULL,
 			fg_decode_value_16b),
-	FG_SRAM_PARAM_DEF(DATA_CHARGE, 0x570, 0, 4, PMI8950_FULL_PERCENT_3B,
+	FG_SRAM_PARAM_DEF(DATA_CHARGE, 0x570, 0, 4, FULL_PERCENT_3B,
 			10000, 0, NULL, fg_decode_current),
 	FG_SRAM_PARAM_DEF(DATA_OCV, 0x588, 3, 2, PMI8950_LSB_16B_NUMRTR,
 			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b),
@@ -229,7 +229,7 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 			fg_decode_float),
 	FG_SRAM_PARAM_DEF(DATA_ACT_CAP,
 			0x5e4, 0, 2, 0, 0, 0, NULL, NULL),
-	FG_SRAM_PARAM_DEF(DATA_BATT_SOC, 0x56c, 1, 3, PMI8950_FULL_PERCENT_3B,
+	FG_SRAM_PARAM_DEF(DATA_BATT_SOC, 0x56c, 1, 3, FULL_PERCENT_3B,
 			10000, 0, NULL, fg_decode_value_16b),
 	FG_SRAM_PARAM_DEF(DATA_BATT_ESR_REG, 0x4f4, 2, 2, 0, 0, 0, NULL,
 			fg_decode_float),
@@ -1076,6 +1076,7 @@ struct fg_chip {
 	struct fg_rslow_data rslow_comp;
 	int health;
 	int status;
+	int prev_status;
 	int charge_status;
 	int prev_charge_status;
 	enum temperature temp_status;
@@ -1091,6 +1092,7 @@ struct fg_chip {
 	bool irqs_enabled;
 	bool full_soc_irq_enabled;
 	bool vbat_low_irq_enabled;
+	bool use_vbat_low_empty_soc;
 	bool power_supply_registered;
 	bool charge_done;
 	bool charge_full;
@@ -3195,6 +3197,20 @@ static bool is_input_present(struct fg_chip *chip)
 	return is_usb_present(chip) || is_dc_present(chip);
 }
 
+static bool is_otg_present(struct fg_chip *chip)
+{
+	return false;
+	/*TODO: OTG detection
+	union power_supply_propval prop = {0,};
+	if (!chip->usb_psy)
+		chip->usb_psy = power_supply_get_by_name("usb");
+	if (chip->usb_psy)
+		power_supply_get_property(chip->usb_psy,
+				POWER_SUPPLY_PROP_USB_OTG, &prop);
+	return prop.intval != 0;
+	*/
+}
+
 static bool is_charger_available(struct fg_chip *chip)
 {
 	if (!chip->batt_psy)
@@ -3204,6 +3220,80 @@ static bool is_charger_available(struct fg_chip *chip)
 		return false;
 
 	return true;
+}
+
+static bool is_parallel_charger_available(struct fg_chip *chip)
+{
+	if (!chip->parallel_psy)
+		chip->parallel_psy = power_supply_get_by_name("parallel");
+
+	if (!chip->parallel_psy)
+		return false;
+
+	return true;
+}
+
+static int fg_esr_fcc_config(struct fg_chip *chip)
+{
+	union power_supply_propval prop = {0, };
+	int rc;
+	bool parallel_en = false;
+
+	if (is_parallel_charger_available(chip)) {
+		rc = power_supply_get_property(chip->parallel_psy,
+			POWER_SUPPLY_PROP_ONLINE, &prop);
+		if (rc < 0) {
+			pr_err("failed to get charging_enabled from parallel_psy, rc=%d\n",
+				rc);
+			return rc;
+		}
+		parallel_en = prop.intval;
+	}
+	dev_warn(chip->dev, "QNOVO IS NOT SUPPORTED!\n");
+
+	if (chip->charge_status == POWER_SUPPLY_STATUS_CHARGING &&
+			(parallel_en)) {
+		if (chip->esr_fcc_ctrl_en)
+			return 0;
+
+		/*
+		 * When parallel charging or Qnovo is enabled, configure ESR
+		 * FCC to 300mA to trigger an ESR pulse. Without this, FG can
+		 * request the main charger to increase FCC when it is supposed
+		 * to decrease it.
+		 */
+		rc = regmap_update_bits(chip->regmap,
+				BATT_INFO_ESR_FAST_CRG_CFG(chip),
+				ESR_FAST_CRG_IVAL_MASK |
+				ESR_FAST_CRG_CTL_EN_BIT,
+				ESR_FCC_300MA | ESR_FAST_CRG_CTL_EN_BIT);
+		if (rc < 0) {
+			dev_err(chip->dev, "failed to write ESR_FCC: %d\n", rc);
+			return rc;
+		}
+
+		chip->esr_fcc_ctrl_en = true;
+	} else {
+		if (!chip->esr_fcc_ctrl_en)
+			return 0;
+
+		/*
+		 * If we're here, then it means either the device is not in
+		 * charging state or parallel charging / Qnovo is disabled.
+		 * Disable ESR fast charge current control in SW.
+		 */
+		rc = regmap_update_bits(chip->regmap,
+				BATT_INFO_ESR_FAST_CRG_CFG(chip),
+				ESR_FAST_CRG_CTL_EN_BIT, 0);
+		if (rc < 0) {
+			dev_err(chip->dev, "failed to write ESR_FCC: %d\n", rc);
+			return rc;
+		}
+
+		chip->esr_fcc_ctrl_en = false;
+	}
+
+	return 0;
 }
 
 #define MAXRSCHANGE_REG		0x434
@@ -4205,27 +4295,6 @@ static int fg_hw_init(struct fg_chip *chip)
 	}
 }
 
-static int get_vbat_est_diff(struct fg_chip *chip, int *diff)
-{
-	int pred_volt, volt, rc;
-
-	rc = fg_get_param(chip, FG_DATA_VOLTAGE, &volt);
-	if (rc) {
-		pr_err("failed to read voltage\n");
-		return rc;
-	}
-
-	rc = fg_get_param(chip, FG_DATA_CPRED_VOLTAGE, &pred_volt);
-	if (rc) {
-		pr_err("failed to read pred volt\n");
-		return rc;
-	}
-
-	*diff = abs(volt - pred_volt);
-
-	return 0;
-}
-
 #define PROFILE_LOAD_BIT	BIT(0)
 #define BOOTLOADER_LOAD_BIT	BIT(1)
 #define BOOTLOADER_RESTART_BIT	BIT(2)
@@ -5131,100 +5200,153 @@ static int fg_esr_validate(struct fg_chip *chip)
 	return rc;
 }
 
-static int fg_vbat_est_check(struct fg_chip *chip)
-{
-	int rc = 0;
-	int vbat_est_diff, vbat_est_thr_uv;
-	bool batt_missing = is_battery_missing(chip);
-	int voltage, pred_voltage;
-
-	rc = fg_get_param(chip, FG_DATA_VOLTAGE, &voltage);
-	if (rc)
-		return rc;
-	rc = fg_get_param(chip, FG_DATA_CPRED_VOLTAGE, &pred_voltage);
-	if (rc)
-		return rc;
-
-	rc = get_vbat_est_diff(chip, &vbat_est_diff);
-	vbat_est_thr_uv = chip->cl.vbat_est_thr_uv;
-	pr_info("vbat(%d),est-vbat(%d),diff(%d),threshold(%d)\n",
-			voltage, pred_voltage,
-			vbat_est_diff, vbat_est_thr_uv);
-
-	if ((vbat_est_diff > vbat_est_thr_uv)
-		&& !batt_missing) {
-		pr_info("vbat_est_diff is larger than vbat_est_thr_uv,so force fg restart\n");
-		//TODO: Toggle charging before restart
-		pr_err("VBAT ESTIMATES INVALID\n");
-		pr_err("NEED TO RESTART, BUT NOT RESTARTING\n");
-		/*rc = fg_do_restart(chip, true);
-		if (rc)
-			pr_err("fg restart failed: %d\n", rc);*/
-	}
-	return rc;
-}
-
-#define MAX_BATTERY_CC_SOC_CAPACITY
-static void fg_status_change_work(struct work_struct *work)
+#define MAX_BATTERY_CC_SOC_CAPACITY		150
+static void status_change_work_pmi8950(struct work_struct *work)
 {
 	struct fg_chip *chip = container_of(work,
 				struct fg_chip,
 				status_change_work);
-	int cc_soc, batt_soc, rc, capacity;
+	int batt_soc, rc, capacity;
 	bool batt_missing = is_battery_missing(chip);
+	bool input_present = is_input_present(chip);
+	bool otg_present = is_otg_present(chip);
 
 	if (batt_missing)
 		return;
 
 	rc = fg_get_capacity(chip, &capacity);
-	if (rc) {
-		pr_err("failed to get capacity\n");
-		return;
-	}
 
+	if (chip->status == POWER_SUPPLY_STATUS_FULL) {
+		/* NOTE: hold-soc-while-full is assumed */
+		if (capacity >= 99 && chip->health == POWER_SUPPLY_HEALTH_GOOD)
+			chip->charge_full = true;
+	}
 	if (chip->status == POWER_SUPPLY_STATUS_FULL ||
 			chip->status == POWER_SUPPLY_STATUS_CHARGING) {
-		if (!chip->vbat_low_irq_enabled) {
+		if (!chip->vbat_low_irq_enabled &&
+				!chip->use_vbat_low_empty_soc) {
 			enable_irq(chip->irqs[VBATT_LOW_8950_IRQ].irq);
+			enable_irq_wake(chip->irqs[VBATT_LOW_8950_IRQ].irq);
 			chip->vbat_low_irq_enabled = true;
 		}
 
 		if (!chip->full_soc_irq_enabled) {
 			enable_irq(chip->irqs[FULL_SOC_IRQ].irq);
+			enable_irq_wake(chip->irqs[FULL_SOC_IRQ].irq);
 			chip->full_soc_irq_enabled = true;
 		}
 	} else if (chip->status == POWER_SUPPLY_STATUS_DISCHARGING) {
-		if (chip->vbat_low_irq_enabled) {
+		if (chip->vbat_low_irq_enabled &&
+				!chip->use_vbat_low_empty_soc) {
+			disable_irq_wake(chip->irqs[VBATT_LOW_8950_IRQ].irq);
 			disable_irq_nosync(chip->irqs[VBATT_LOW_8950_IRQ].irq);
 			chip->vbat_low_irq_enabled = false;
 		}
 
 		if (chip->full_soc_irq_enabled) {
+			disable_irq_wake(chip->irqs[FULL_SOC_IRQ].irq);
 			disable_irq_nosync(chip->irqs[FULL_SOC_IRQ].irq);
 			chip->full_soc_irq_enabled = false;
 		}
 	}
-	fg_vbat_est_check(chip);
-	//TODO:schedule_work(&chip->update_esr_work);
+	fg_cap_learning_update(chip);
+	fg_update_esr_values(chip);
 
-	if (fg_get_param(chip, FG_DATA_CHARGE_COUNTER, &cc_soc)) {
-		pr_err("failed to get CC_SOC\n");
-		return;
+	if (chip->prev_status != chip->status) {
+		/*
+		 * Reset SW_CC_SOC to a value based off battery SOC when
+		 * the device is discharging.
+		 */
+		if (chip->status == POWER_SUPPLY_STATUS_DISCHARGING) {
+			const struct fg_sram_param batt_soc_p =
+				chip->param[FG_DATA_BATT_SOC];
+			rc = fg_sram_read(chip, (u8 *)&batt_soc,
+					batt_soc_p.address, batt_soc_p.length,
+					batt_soc_p.offset, false);
+			if (rc)
+				return;
+			if (!batt_soc)
+				return;
+
+			batt_soc = div64_s64((int64_t)batt_soc *
+					FULL_PERCENT_28BIT, FULL_PERCENT_3B);
+			rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER,
+					(u8 *)&batt_soc);
+			if (rc)
+				dev_err(chip->dev,
+					"failed to reset CC_SOC_REG: %d\n", rc);
+		}
+
+		fg_cycle_counter_update(chip);
 	}
 
-	if (chip->status == POWER_SUPPLY_STATUS_DISCHARGING) {
-		fg_get_param(chip, FG_DATA_BATT_SOC, &batt_soc);
-		if (!batt_soc)
-			return;
-
-		batt_soc = div64_s64((int64_t)batt_soc *
-				FULL_PERCENT_28BIT, PMI8950_FULL_PERCENT_3B);
-		rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER,
-				(u8 *)&batt_soc);
-		if (rc)
-			pr_err("Failed to reset CC_SOC_REG rc=%d\n",
-					rc);
+	if (chip->input_present ^ input_present ||
+		chip->otg_present ^ otg_present) {
+		//TODO:fg_stay_awake(chip, FG_GAIN_COMP_WAKE);
+		chip->input_present = input_present;
+		chip->otg_present = otg_present;
+		fg_iadc_gain_comp(chip);
 	}
+}
+
+static void status_change_work_pmi8998(struct work_struct *work)
+{
+	struct fg_chip *chip = container_of(work,
+			struct fg_chip, status_change_work);
+	union power_supply_propval prop = {0, };
+	int rc, batt_temp;
+
+	if (!batt_psy_initialized(chip))
+		goto out;
+
+	if (!chip->soc_reporting_ready)
+		goto out;
+
+	rc = power_supply_get_property(chip->batt_psy, POWER_SUPPLY_PROP_STATUS,
+			&prop);
+	if (rc < 0) {
+		pr_err("Error in getting charging status, rc=%d\n", rc);
+		goto out;
+	}
+
+	chip->charge_status = prop.intval;
+
+	/*TODO: investigate
+	rc = power_supply_get_property(chip->batt_psy,
+			POWER_SUPPLY_PROP_CHARGE_DONE, &prop);
+	if (rc < 0) {
+		pr_err("Error in getting charge_done, rc=%d\n", rc);
+		goto out;
+	}
+	chip->charge_done = prop.intval;*/
+	fg_cycle_counter_update(chip);
+	fg_cap_learning_update(chip);
+
+	rc = fg_charge_full_update(chip);
+	if (rc < 0)
+		pr_err("Error in charge_full_update, rc=%d\n", rc);
+
+	/* NOTE: auto-recharge-soc is assumed */
+	rc = fg_adjust_ki_coeff_dischg(chip);
+	if (rc < 0)
+		pr_err("Error in adjusting ki_coeff_dischg, rc=%d\n", rc);
+
+	rc = fg_esr_fcc_config(chip);
+	if (rc < 0)
+		pr_err("Error in adjusting FCC for ESR, rc=%d\n", rc);
+
+	rc = fg_get_temperature(chip, &batt_temp);
+	if (!rc) {
+		rc = fg_adjust_ki_coeff_full_soc(chip, batt_temp);
+		if (rc < 0)
+			pr_err("Error in configuring ki_coeff_full_soc rc:%d\n",
+				rc);
+	}
+
+	chip->prev_charge_status = chip->charge_status;
+out:
+	return;
+	//TODO:fg_relax(chip, FG_STATUS_NOTIFY_WAKE);
 }
 
 #define IACS_INTR_SRC_SLCT	BIT(3)
@@ -5449,7 +5571,6 @@ static int fg_probe(struct platform_device *pdev)
 	mutex_init(&chip->cl.lock);
 	mutex_init(&chip->rslow_comp.lock);
 	mutex_init(&chip->cyc_ctr.lock);
-	INIT_WORK(&chip->status_change_work, fg_status_change_work);
 	init_completion(&chip->first_soc_done);
 	init_completion(&chip->sram_access_granted);
 	init_completion(&chip->sram_access_revoked);
@@ -5475,6 +5596,7 @@ static int fg_probe(struct platform_device *pdev)
 	chip->irqs = match_data->irqs;
 	chip->do_restart = match_data->do_restart;
 	chip->rconn_config = match_data->rconn_config;
+	INIT_WORK(&chip->status_change_work, match_data->status_change_work);
 
 	chip->status = POWER_SUPPLY_STATUS_DISCHARGING;
 
@@ -5537,24 +5659,24 @@ static const struct fg_pmic_data pmi8950_fg = {
 	.params			= fg_params_pmi8950,
 	.irqs			= fg_irqs_pmi8950,
 	.init_irqs		= fg_init_irqs_pmi8950,
-	/*.status_change_work	= status_change_work_pmi8950,
-	.do_restart		= fg_do_restart_pmi8950,*/
+	.status_change_work	= status_change_work_pmi8950,
+	/*.do_restart		= fg_do_restart_pmi8950,*/
 	.rconn_config		= fg_rconn_config_pmi8950,
 }, pmi8998v1_fg = {
 	.pmic_version		= PMI8998_V1,
 	.params			= fg_params_pmi8998_v1,
 	.irqs			= fg_irqs_pmi8998,
 	.init_irqs		= fg_init_irqs_pmi8998,
-	/*.status_change_work	= status_change_work_pmi8998,
-	.do_restart		= fg_do_restart_pmi8998,*/
+	.status_change_work	= status_change_work_pmi8998,
+	/*.do_restart		= fg_do_restart_pmi8998,*/
 	.rconn_config		= fg_rconn_config_pmi8998,
 }, pmi8998v2_fg = {
 	.pmic_version		= PMI8998_V2,
 	.params			= fg_params_pmi8998_v2,
 	.irqs			= fg_irqs_pmi8998,
 	.init_irqs		= fg_init_irqs_pmi8998,
-	/*.status_change_work	= status_change_work_pmi8998,
-	.do_restart		= fg_do_restart_pmi8998,*/
+	.status_change_work	= status_change_work_pmi8998,
+	/*.do_restart		= fg_do_restart_pmi8998,*/
 	.rconn_config		= fg_rconn_config_pmi8998,
 };
 
