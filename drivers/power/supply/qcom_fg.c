@@ -139,6 +139,18 @@ enum fg_sram_param_id {
 	FG_SETTING_BATT_WARM_TEMP,
 	FG_SETTING_BATT_HOT_TEMP,
 	FG_SETTING_THERM_DELAY,
+	FG_SETTING_ESR_TIMER_DISCHG_MAX,
+	FG_SETTING_ESR_TIMER_DISCHG_INIT,
+	FG_SETTING_ESR_TIMER_CHG_MAX,
+	FG_SETTING_ESR_TIMER_CHG_INIT,
+	FG_SETTING_ESR_TIGHT_FILTER,
+	FG_SETTING_ESR_BROAD_FILTER,
+	FG_SETTING_ESR_PULSE_THR,
+	FG_SETTING_KI_COEFF_LOW_DISCHG,
+	FG_SETTING_KI_COEFF_MED_DISCHG,
+	FG_SETTING_KI_COEFF_HI_DISCHG,
+	FG_SETTING_KI_COEFF_DISCHG,
+	FG_SETTING_KI_COEFF_FULL_SOC,
 	FG_PARAM_MAX
 };
 
@@ -784,6 +796,8 @@ struct fg_rslow_data {
 	uint32_t		chg_rslow_comp_c1;
 	uint32_t		chg_rslow_comp_c2;
 	uint32_t		chg_rslow_comp_thr;
+	bool			active;
+	struct mutex		lock;
 };
 
 struct battery_info {
@@ -795,6 +809,7 @@ struct battery_info {
 	bool nom_cap_unbound;
 
 	u8 thermal_coeffs[6];
+	u8 thermal_coeffs_len;
 
 	u8 *batt_profile;
 	unsigned batt_profile_len;
@@ -815,6 +830,12 @@ enum fg_irq_names {
 	BATT_MISSING,
 	FG_MEM_AVAIL,
 	FG_IRQS_MAX
+};
+
+struct fg_iadc_comp_data {
+	u8			dfl_gain_reg[2];
+	bool			gain_active;
+	int64_t			dfl_gain;
 };
 
 enum esr_timer_config {
@@ -872,6 +893,7 @@ struct fg_chip {
 	struct fg_sram_param *param;
 	struct battery_info batt_info;
 	struct fg_dt_props dt;
+	struct fg_iadc_comp_data iadc_comp_data;
 
 	struct fg_learning_data learning_data;
 	struct fg_rslow_data rslow_comp;
@@ -880,7 +902,6 @@ struct fg_chip {
 	int vbatt_est_diff;
 
 	//board specific init fn
-	int (*init_fn)(struct fg_chip *);
 	int irqs[FG_IRQS_MAX];
 
 	struct work_struct status_change_work;
@@ -895,6 +916,9 @@ struct fg_chip {
 	struct completion first_soc_done;
 	struct completion sram_access_granted;
 	struct completion sram_access_revoked;
+
+	int (*do_restart)(struct fg_chip *chip, bool write_profile);
+	int (*rconn_config)(struct fg_chip *chip);
 };
 
 static int fg_read(struct fg_chip *chip, u8 *val, u16 addr, int len);
@@ -1082,6 +1106,16 @@ static const struct fg_irq {
 		IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING | IRQF_ONESHOT},
 	{ "mem-avail", fg_mem_avail_irq_handler,
 		IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING },
+};
+
+struct fg_pmic_data {
+	enum pmic pmic_version;
+	struct fg_sram_param *params;
+	struct fg_irq *irqs;
+	int (*init_irqs)(struct fg_chip *chip);
+	void (*status_change_work)(struct work_struct * work);
+	int (*do_restart)(struct fg_chip *chip, bool write_profile);
+	int (*rconn_config)(struct fg_chip *chip);
 };
 
 /* All getters HERE */
@@ -1528,7 +1562,7 @@ static int fg_reset(struct fg_chip *chip, bool reset)
 		0xff, reset ? RESET_MASK : 0);
 }
 
-static int fg_set_sram_param(struct fg_chip *chip, enum fg_sram_param_id id,
+static int fg_set_param(struct fg_chip *chip, enum fg_sram_param_id id,
 		u8 *val);
 
 static void fg_enable_irqs(struct fg_chip *chip, bool enable)
@@ -1573,6 +1607,8 @@ static void fg_enable_irqs(struct fg_chip *chip, bool enable)
 	}
 }
 
+static int fg_hw_init(struct fg_chip *chip);
+
 #define EN_WR_FGXCT_PRD		BIT(6)
 #define EN_RD_FGXCT_PRD		BIT(5)
 #define FG_RESTART_TIMEOUT_MS	12000
@@ -1616,10 +1652,10 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 	/* Wait for at least a FG cycle before doing SRAM access */
 	msleep(2000);
 
-	chip->init_fn(chip);
+	fg_hw_init(chip);
 
 out:
-	rc = fg_set_sram_param(chip, FG_DATA_VINT_ERR, buf);
+	rc = fg_set_param(chip, FG_DATA_VINT_ERR, buf);
 	if (rc < 0)
 		dev_err(chip->dev, "Error in clearing VACT_INT_ERR, rc=%d\n",
 				rc);
@@ -2245,26 +2281,23 @@ static int fg_sram_write(struct fg_chip *chip, u8 *val, u16 address,
 				len, offset, keep_access);
 }
 
-static int fg_set_sram_param(struct fg_chip *chip, enum fg_sram_param_id id,
+static void fg_encode(struct fg_sram_param param, int val, u8 *buf)
+{
+	if (!param.encode)
+		return;
+	param.encode(param, val, buf);
+}
+
+static int fg_set_param(struct fg_chip *chip, enum fg_sram_param_id id,
 		u8 *val)
 {
-	u8 buf[4];
 	struct fg_sram_param param = chip->param[id];
 
 	if (!param.address || !param.length)
 		return -EINVAL;
 
-	if (param.length > ARRAY_SIZE(buf))
-		return -EINVAL;
-
-	if (param.encode) {
-		param.encode(param, *(int *)val, buf);
-		return fg_sram_write(chip, buf, param.address, param.length,
-				param.offset, false);
-	} else {
-		return fg_sram_write(chip, val, param.address, param.length,
-				param.offset, false);
-	}
+	return fg_sram_write(chip, val, param.address, param.length,
+			param.offset, false);
 }
 
 static int __fg_interleaved_sram_read(struct fg_chip *chip, u8 *val,
@@ -2555,6 +2588,7 @@ static int fg_rconn_config_pmi8998(struct fg_chip *chip)
 	int rc, esr_uohms;
 	u64 scaling_factor;
 	u32 val = 0;
+	u8 buf[4];
 
 	if (!chip->batt_info.rconn_mohm)
 		return 0;
@@ -2587,13 +2621,15 @@ static int fg_rconn_config_pmi8998(struct fg_chip *chip)
 
 	val *= scaling_factor;
 	do_div(val, 1000);
-	rc = fg_set_sram_param(chip, FG_SETTING_RSLOW_CHG, (u8 *)&val);
+	fg_encode(chip->param[FG_SETTING_RSLOW_CHG], val, buf);
+	rc = fg_set_param(chip, FG_SETTING_RSLOW_CHG, buf);
 	if (rc < 0) {
 		pr_err("Error in writing ESR_RSLOW_CHG, rc=%d\n", rc);
 		return rc;
 	}
 
-	rc = fg_set_sram_param(chip, FG_SETTING_RSLOW_DISCHG, (u8 *)&val);
+	fg_encode(chip->param[FG_SETTING_RSLOW_DISCHG], val, buf);
+	rc = fg_set_param(chip, FG_SETTING_RSLOW_DISCHG, buf);
 	if (rc < 0) {
 		pr_err("Error in reading ESR_RSLOW_DISCHG_OFFSET, rc=%d\n", rc);
 		return rc;
@@ -2601,7 +2637,8 @@ static int fg_rconn_config_pmi8998(struct fg_chip *chip)
 
 	val *= scaling_factor;
 	do_div(val, 1000);
-	rc = fg_set_sram_param(chip, FG_SETTING_RSLOW_DISCHG, (u8 *)&val);
+	fg_encode(chip->param[FG_SETTING_RSLOW_DISCHG], val, buf);
+	rc = fg_set_param(chip, FG_SETTING_RSLOW_DISCHG, buf);
 	if (rc < 0) {
 		pr_err("Error in writing ESR_RSLOW_DISCHG_OFFSET, rc=%d\n", rc);
 		return rc;
@@ -2622,6 +2659,7 @@ static int fg_rconn_config_pmi8950(struct fg_chip *chip)
 {
 	int rs_to_rslow_chg, rs_to_rslow_dischg, batt_esr, rconn_uohm;
 	int rc;
+	u8 buf[4];
 
 	rc = fg_get_param(chip, FG_DATA_BATT_ESR, &batt_esr);
 	if (rc) {
@@ -2647,15 +2685,16 @@ static int fg_rconn_config_pmi8950(struct fg_chip *chip)
 	rs_to_rslow_chg = div64_s64(rs_to_rslow_chg * batt_esr,
 					batt_esr + rconn_uohm);
 
-	rc = fg_set_sram_param(chip, FG_SETTING_RSLOW_CHG,
-			(u8 *)&rs_to_rslow_chg);
+	fg_encode(chip->param[FG_SETTING_RSLOW_CHG], rs_to_rslow_chg, buf);
+	rc = fg_set_param(chip, FG_SETTING_RSLOW_CHG, buf);
 	if (rc) {
 		pr_err("unable to write rs_to_rslow_chg: %d\n", rc);
 		return rc;
 	}
 
-	rc = fg_set_sram_param(chip, FG_SETTING_RSLOW_DISCHG,
-			(u8 *)&rs_to_rslow_dischg);
+	fg_encode(chip->param[FG_SETTING_RSLOW_DISCHG], rs_to_rslow_dischg,
+			buf);
+	rc = fg_set_param(chip, FG_SETTING_RSLOW_DISCHG, buf);
 	if (rc) {
 		pr_err("unable to write rs_to_rslow_dischg: %d\n", rc);
 		return rc;
@@ -2674,40 +2713,67 @@ static int fg_rconn_config_pmi8950(struct fg_chip *chip)
 					EMPTY_FROM_SOC_BIT | \
 					EMPTY_FROM_VOLTAGE_BIT)
 #define ALERT_CFG_OFFSET		3
-#define EXTERNAL_SENSE_SELECT		0x4ac
+#define EXTERNAL_SENSE_SELECT_REG	0x4ac
 #define EXTERNAL_SENSE_OFFSET		2
 #define EXTERNAL_SENSE_BIT		BIT(2)
+#define THERMAL_COEFF_ADDR_PMI8950	0x444
+#define THERMAL_COEFF_OFFSET_PMI8950	0x2
+#define THERM_DELAY_REG			0x4ac
+#define THERM_DELAY_OFFSET		3
+#define JEITA_TEMP_REG_PMI8950		0x454
+#define JEITA_TEMP_LEN_PMI8950		4
+#define JEITA_TEMP_OFF_PMI8950		0
+#define RSLOW_CFG_REG			0x538
+#define RSLOW_CFG_LEN			1
+#define RSLOW_CFG_OFFSET		2
+#define RSLOW_CFG_MASK			(BIT(2) | BIT(3) | BIT(4) | BIT(5))
+#define RSLOW_CFG_ON_VAL		(BIT(2) | BIT(3))
+#define RSLOW_THRESH_FULL_VAL		0xff
 static int fg_hw_init_pmi8950(struct fg_chip *chip)
 {
 	int rc;
 	u8 buf[4];
 
-	buf[0] = 0xff;
-	rc = fg_write(chip, buf, INT_EN_CLR(chip->mem_base), 1);
+	rc = fg_sram_masked_write(chip, EXTERNAL_SENSE_SELECT_REG,
+			EXTERNAL_SENSE_BIT, 0, EXTERNAL_SENSE_OFFSET);
 	if (rc) {
-		pr_err("failed to clear interrupts\n");
+		dev_err(chip->dev, "failed to write ext_sense_sel: %d\n", rc);
 		return rc;
 	}
 
-	rc = fg_sram_masked_write(chip, EXTERNAL_SENSE_SELECT,
-			EXTERNAL_SENSE_BIT, 0, EXTERNAL_SENSE_OFFSET);
-
-	if (chip->param[FG_SETTING_THERMAL_COEFFS].length > 0) {
-		rc = fg_set_sram_param(chip, FG_SETTING_THERMAL_COEFFS,
-				chip->batt_info.thermal_coeffs);
+	if (chip->batt_info.thermal_coeffs_len != 0) {
+		rc = fg_sram_write(chip, chip->batt_info.thermal_coeffs,
+				THERMAL_COEFF_ADDR_PMI8950,
+				chip->batt_info.thermal_coeffs_len,
+				THERMAL_COEFF_OFFSET_PMI8950, false);
 		if (rc) {
-			dev_err(chip->dev, "error writing thermal coeffs to "\
-					"batt soc");
+			dev_err(chip->dev, "failed to write thermal coeffs to"\
+					" batt soc");
 		}
 	}
 
-	rc = fg_sram_masked_write_param(chip, FG_SETTING_THERM_DELAY, 0xe0,
-			buf[0]);
+	rc = fg_sram_masked_write(chip, THERM_DELAY_REG, THERM_DELAY_MASK,
+			0, THERM_DELAY_OFFSET);
 	if (rc) {
-		pr_err("failed to write therm_delay rc=%d\n", rc);
+		dev_err(chip->dev, "failed to write therm_delay rc=%d\n", rc);
 		return rc;
 	}
 
+	buf[0] =  chip->dt.cool_temp / 10 + 30;
+	buf[1] =  chip->dt.warm_temp / 10 + 30;
+	buf[2] =  chip->dt.cold_temp / 10 + 30;
+	buf[3] =  chip->dt.hot_temp  / 10 + 30;
+
+	rc = fg_sram_write(chip, buf, JEITA_TEMP_REG_PMI8950,
+			JEITA_TEMP_LEN_PMI8950, JEITA_TEMP_OFF_PMI8950, false);
+	if (rc) {
+		dev_err(chip->dev, "failed to write jeita temp settings: %d\n",
+				rc);
+		return rc;
+	}
+
+	if (buf[0] & RSLOW_CFG_ON_VAL)
+		chip->rslow_comp.active = true;
 	/*
 	 * Clear bits 0-2 in 0x4B3 and set them again to make empty_soc irq
 	 * trigger again.
@@ -2715,7 +2781,8 @@ static int fg_hw_init_pmi8950(struct fg_chip *chip)
 	rc = fg_sram_masked_write(chip, FG_ALG_SYSCTL_REG, EMPTY_SOC_IRQ_MASK,
 			0, ALERT_CFG_OFFSET);
 	if (rc) {
-		pr_err("failed to write to fg_alg_sysctl rc=%d\n", rc);
+		dev_err(chip->dev, "failed to write to fg_alg_sysctl rc=%d\n",
+				rc);
 		return rc;
 	}
 
@@ -2725,55 +2792,373 @@ static int fg_hw_init_pmi8950(struct fg_chip *chip)
 	rc = fg_sram_masked_write(chip, FG_ALG_SYSCTL_REG, EMPTY_SOC_IRQ_MASK,
 			EMPTY_SOC_IRQ_MASK, ALERT_CFG_OFFSET);
 	if (rc) {
-		pr_err("failed to write to fg_alg_sysctl rc=%d\n", rc);
+		dev_err(chip->dev, "failed to write fg_alg_sysctl: %d\n", rc);
 		return rc;
 	}
 
 	rc = fg_sram_masked_write(chip, FG_ADC_CONFIG_REG,
 			BCL_FORCED_HPM_IN_CHARGE, BCL_FORCED_HPM_IN_CHARGE, 3);
 	if (rc) {
-		dev_err(chip->dev, "failed to set HPM_IN_CHARGE\n");
+		dev_err(chip->dev, "failed to set HPM_IN_CHARGE: %d\n", rc);
 		return rc;
 	}
 
-	rc = fg_rconn_config_pmi8950(chip);
+	rc = fg_sram_read(chip, buf, RSLOW_CFG_REG, RSLOW_CFG_LEN,
+			RSLOW_CFG_OFFSET, false);
 	if (rc) {
-		pr_err("failed to config rconn\n");
+		dev_err(chip->dev, "failed to read rslow_cfg: %d\n", rc);
 		return rc;
 	}
 
 	return rc;
 }
 
-static int fg_hw_init_pmi8998(struct fg_chip *chip)
+static int fg_set_esr_timer(struct fg_chip *chip, int cycles_init,
+				int cycles_max, bool charging)
 {
-	int rc;
-	//u8 buf[4];
+	int rc, timer_max, timer_init;
+	u8 buf[2];
 
-	//TODO: needs proper dts setup
-	//TODO: write temperatures to sram
-	//TODO: write ESR
-	//TODO: write sleep thresh
-	if (chip->param[FG_SETTING_THERMAL_COEFFS].length > 0) {
-		rc = fg_write(chip, chip->batt_info.thermal_coeffs,
-				BATT_INFO_THERM_C1(chip),
-				chip->param[FG_SETTING_THERMAL_COEFFS].length);
-		if (rc < 0) {
-			pr_err("failed to write thermal coefficients, rc=%d\n",
-				rc);
+	if (cycles_init < 0 || cycles_max < 0)
+		return 0;
+
+	if (charging) {
+		timer_max = FG_SETTING_ESR_TIMER_CHG_MAX;
+		timer_init = FG_SETTING_ESR_TIMER_CHG_INIT;
+	} else {
+		timer_max = FG_SETTING_ESR_TIMER_DISCHG_MAX;
+		timer_init = FG_SETTING_ESR_TIMER_DISCHG_INIT;
+	}
+
+	fg_encode(chip->param[timer_max], cycles_max, buf);
+	rc = fg_set_param(chip, timer_max, buf);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to write esr_timer_max, rc=%d\n",
+			rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[timer_init], cycles_max, buf);
+	rc = fg_set_param(chip, timer_init, buf);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to write esr_timer_init, rc=%d\n",
+			rc);
+		return rc;
+	}
+
+	return 0;
+}
+
+/* BATT_INFO_ESR_PULL_DN_CFG */
+#define ESR_PULL_DOWN_IVAL_MASK			GENMASK(3, 2)
+#define ESR_PULL_DOWN_IVAL_SHIFT		2
+#define ESR_MEAS_CUR_60MA			0x0
+#define ESR_MEAS_CUR_120MA			0x1
+#define ESR_MEAS_CUR_180MA			0x2
+#define ESR_MEAS_CUR_240MA			0x3
+#define ESR_PULL_DOWN_MODE_MASK			GENMASK(1, 0)
+#define ESR_NO_PULL_DOWN			0x0
+#define ESR_STATIC_PULL_DOWN			0x1
+#define ESR_CRG_DSC_PULL_DOWN			0x2
+#define ESR_DSC_PULL_DOWN			0x3
+static inline void get_esr_meas_current(int curr_ma, u8 *val)
+{
+	switch (curr_ma) {
+	case 60:
+		*val = ESR_MEAS_CUR_60MA;
+		break;
+	case 120:
+		*val = ESR_MEAS_CUR_120MA;
+		break;
+	case 180:
+		*val = ESR_MEAS_CUR_180MA;
+		break;
+	case 240:
+		*val = ESR_MEAS_CUR_240MA;
+		break;
+	default:
+		*val = ESR_MEAS_CUR_120MA;
+		break;
+	};
+
+	*val <<= ESR_PULL_DOWN_IVAL_SHIFT;
+}
+
+static int fg_init_iadc_config(struct fg_chip *chip)
+{
+	/* IADC gain is only for pmi8950 and older */
+	u8 reg[2];
+	int rc;
+
+	struct fg_sram_param def_gain_reg = {
+		.address	= 0x484,
+		.offset		= 2,
+		.length		= 2,
+	}, gain_reg = {
+		.address	= 0x424,
+		.offset		= 1,
+		.length		= 2,
+	};
+
+	/* read default gain config */
+	rc = fg_sram_read(chip, reg, def_gain_reg.address,
+			def_gain_reg.length, def_gain_reg.offset, false);
+	if (rc) {
+		dev_err(chip->dev, "failed to read default gain: %d\n", rc);
+		return rc;
+	}
+
+	if (reg[1] || reg[0]) {
+		/*
+		 * Default gain register has valid value:
+		 * - write to gain register.
+		 */
+		rc = fg_sram_write(chip, reg, gain_reg.address, gain_reg.length,
+				gain_reg.offset, false);
+		if (rc) {
+			dev_err(chip->dev, "failed to write gain: %d\n", rc);
+			return rc;
+		}
+	} else {
+		/*
+		 * Default gain register is invalid:
+		 * - read gain register for default gain value
+		 * - write to default gain register.
+		 */
+		rc = fg_sram_read(chip, reg, gain_reg.address, gain_reg.length,
+				gain_reg.offset, false);
+		if (rc) {
+			dev_err(chip->dev, "failed to read gain: %d\n", rc);
+			return rc;
+		}
+		rc = fg_sram_write(chip, reg, def_gain_reg.address,
+				def_gain_reg.length, def_gain_reg.offset, false);
+		if (rc) {
+			dev_err(chip->dev, "failed to write default gain: %d\n",
+					rc);
 			return rc;
 		}
 	}
 
-	if (chip->pmic_version == PMI8998_V1)
-		;
+	chip->iadc_comp_data.dfl_gain_reg[0] = reg[0];
+	chip->iadc_comp_data.dfl_gain_reg[1] = reg[1];
+	chip->iadc_comp_data.dfl_gain = fg_decode_float(def_gain_reg, reg);
 
-	rc = fg_rconn_config_pmi8998(chip);
+	return 0;
+}
+
+static int fg_hw_init_pmi8998(struct fg_chip *chip)
+{
+	int rc;
+	u8 buf[4];
+
+	fg_encode(chip->param[FG_SETTING_DELTA_BSOC], 1, buf);
+	rc = fg_set_param(chip, FG_SETTING_DELTA_BSOC, buf);
 	if (rc) {
-		pr_err("failed to config rconn\n");
+		dev_err(chip->dev, "failed to set delta_bsoc: %d\n", rc);
 		return rc;
 	}
+
+	fg_encode(chip->param[FG_SETTING_SYS_TERM_CURRENT],
+			chip->dt.sys_term_current_ma, buf);
+	rc = fg_set_param(chip, FG_SETTING_SYS_TERM_CURRENT, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to write sys_term_current: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[FG_SETTING_CHG_TERM_CURRENT],
+			chip->dt.chg_term_current_ma, buf);
+	rc = fg_set_param(chip, FG_SETTING_CHG_TERM_BASE_CURRENT, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to write chg_term_current: %d\n", rc);
+		return rc;
+	}
+
+	if (chip->batt_info.thermal_coeffs_len != 0) {
+		rc = regmap_bulk_write(chip->regmap, BATT_INFO_THERM_C1(chip),
+				chip->batt_info.thermal_coeffs,
+				chip->batt_info.thermal_coeffs_len);
+		if (rc < 0) {
+			dev_err(chip->dev, "failed to write therm coeffs %d\n",
+					rc);
+			return rc;
+		}
+	}
+
+	rc = fg_set_esr_timer(chip, chip->dt.esr_timer_charging[TIMER_RETRY],
+			chip->dt.esr_timer_charging[TIMER_MAX], true);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to write ESR timer: %d\n", rc);
+		return rc;
+	}
+
+	rc = fg_set_esr_timer(chip, chip->dt.esr_timer_awake[TIMER_RETRY],
+			chip->dt.esr_timer_awake[TIMER_MAX], false);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to write ESR timer: %d\n", rc);
+		return rc;
+	}
+	/*
+	 * Set temperature limits
+	 * Base is -30C, so we add 30C to the value
+	 * Resolution is 0.5C, in deciCelcius
+	 */
+	buf[0] = DIV_ROUND_CLOSEST((chip->dt.cold_temp + 30) * 10, 5);
+	regmap_write(chip->regmap, BATT_INFO_JEITA_COLD(chip), buf[0]);
+
+	buf[0] = DIV_ROUND_CLOSEST((chip->dt.cool_temp + 30) * 10, 5);
+	regmap_write(chip->regmap, BATT_INFO_JEITA_COOL(chip), buf[0]);
+
+	buf[0] = DIV_ROUND_CLOSEST((chip->dt.warm_temp + 30) * 10, 5);
+	regmap_write(chip->regmap, BATT_INFO_JEITA_WARM(chip), buf[0]);
+
+	buf[0] = DIV_ROUND_CLOSEST((chip->dt.hot_temp + 30) * 10, 5);
+	regmap_write(chip->regmap, BATT_INFO_JEITA_HOT(chip), buf[0]);
+
+	if (chip->pmic_version == PMI8998_V2) {
+		fg_encode(chip->param[FG_SETTING_RECHARGE_VOLT_THR],
+				chip->dt.recharge_volt_thr_mv, buf);
+		rc = fg_set_param(chip, FG_SETTING_RECHARGE_VOLT_THR, buf);
+		if (rc) {
+			dev_err(chip->dev, "failed to write recharge_volt_thr:"\
+					" %d\n", rc);
+			return rc;
+		}
+
+		fg_encode(chip->param[FG_SETTING_CHG_TERM_BASE_CURRENT],
+				chip->dt.chg_term_base_current_ma, buf);
+		rc = fg_set_param(chip, FG_SETTING_CHG_TERM_BASE_CURRENT, buf);
+		if (rc) {
+			dev_err(chip->dev, "failed to write term_base_curr: %d\n",
+					rc);
+			return rc;
+		}
+	}
+
+	fg_encode(chip->param[FG_SETTING_ESR_TIGHT_FILTER],
+			chip->dt.esr_tight_flt_upct, buf);
+	rc = fg_set_param(chip, FG_SETTING_ESR_TIGHT_FILTER, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to write esr_tight_flt: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[FG_SETTING_ESR_BROAD_FILTER],
+			chip->dt.esr_broad_flt_upct, buf);
+	rc = fg_set_param(chip, FG_SETTING_ESR_BROAD_FILTER, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to write esr_broad_flt: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[FG_SETTING_ESR_PULSE_THR],
+			chip->dt.esr_pulse_thresh_ma, buf);
+	rc = fg_set_param(chip, FG_SETTING_ESR_PULSE_THR, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to write esr_pulse_thr: %d\n", rc);
+		return rc;
+	}
+
+	get_esr_meas_current(chip->dt.esr_meas_curr_ma, buf);
+	rc = regmap_update_bits(chip->regmap, BATT_INFO_ESR_PULL_DN_CFG(chip),
+			ESR_PULL_DOWN_IVAL_MASK, buf[0]);
+	if (rc) {
+		dev_err(chip->dev, "failed to write esr_meas_curr_ma: %d\n", rc);
+		return rc;
+	}
+
 	return 0;
+}
+
+static int fg_hw_init(struct fg_chip *chip)
+{
+	int rc;
+	u8 buf[4];
+
+	fg_encode(chip->param[FG_SETTING_TERM_CURRENT],
+			chip->dt.term_current_ma, buf);
+	rc = fg_set_param(chip, FG_SETTING_TERM_CURRENT, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to set term_current: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[FG_SETTING_CUTOFF_VOLT],
+			chip->dt.cutoff_volt_mv, buf);
+	rc = fg_set_param(chip, FG_SETTING_CUTOFF_VOLT, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to set cutoff_volt: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[FG_SETTING_BCL_LM_THR],
+			chip->dt.bcl_lm_ma, buf);
+	rc = fg_set_param(chip, FG_SETTING_BCL_LM_THR, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to set blc_lm: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode(chip->param[FG_SETTING_BCL_MH_THR],
+			chip->dt.bcl_mh_ma, buf);
+	rc = fg_set_param(chip, FG_SETTING_BCL_MH_THR, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to set blc_mh: %d\n", rc);
+		return rc;
+	}
+
+	if (chip->dt.recharge_thr > 0) {
+		fg_encode(chip->param[FG_SETTING_RECHARGE_THR],
+				chip->dt.recharge_thr, buf);
+		rc = fg_set_param(chip, FG_SETTING_RECHARGE_THR, buf);
+		if (rc) {
+			dev_err(chip->dev, "failed to set recharge_thr: %d\n", rc);
+			return rc;
+		}
+	}
+
+	fg_encode(chip->param[FG_SETTING_EMPTY_VOLT],
+			chip->dt.empty_irq_volt_mv, buf);
+	rc = fg_set_param(chip, FG_SETTING_EMPTY_VOLT,
+			(u8 *)&chip->dt.empty_irq_volt_mv);
+	if (rc) {
+		dev_err(chip->dev, "failed to set empty_irq_volt: %d\n", rc);
+		return rc;
+	}
+
+	/* Set delta_soc to 1, because its never any other value */
+	fg_encode(chip->param[FG_SETTING_DELTA_MSOC], 1, buf);
+	rc = fg_set_param(chip, FG_SETTING_DELTA_MSOC, buf);
+	if (rc) {
+		dev_err(chip->dev, "failed to set delta_msoc: %d\n", rc);
+		return rc;
+	}
+
+	if (chip->dt.low_volt_thr_mv > 0) {
+		fg_encode(chip->param[FG_SETTING_DELTA_MSOC],
+				chip->dt.low_volt_thr_mv, buf);
+		rc = fg_set_param(chip, FG_SETTING_BATT_LOW, buf);
+		if (rc) {
+			dev_err(chip->dev, "failed to write low_volt_thr: %d\n",
+					rc);
+			return rc;
+		}
+	}
+
+	//restore_cycle_counter(chip);
+
+	switch (chip->pmic_version) {
+		case PMI8950:
+			rc = fg_hw_init_pmi8950(chip);
+			rc |= fg_init_iadc_config(chip);
+			return rc;
+		case PMI8998_V1:
+		case PMI8998_V2:
+			return fg_hw_init_pmi8998(chip);
+		default:
+			return -EINVAL;
+	}
 }
 
 static int get_vbat_est_diff(struct fg_chip *chip, int *diff)
@@ -3004,6 +3389,7 @@ static int fg_of_init(struct fg_chip *chip)
 		chip->dt.recharge_thr = 95;
 		break;
 	default:
+		printk("invalid chip\n");
 		return -EINVAL;
 	}
 
@@ -3206,8 +3592,10 @@ static int fg_calc_and_store_cc_soc_coeff(struct fg_chip *chip, int16_t cc_mah)
 {
 	int rc;
 	int cc_to_soc_coeff, mah_to_soc;
+	u8 buf[4];
 
-	rc = fg_set_sram_param(chip, FG_PARAM_ACTUAL_CAP, (u8 *)&cc_mah);
+	fg_encode(chip->param[FG_PARAM_ACTUAL_CAP], cc_mah, buf);
+	rc = fg_set_param(chip, FG_PARAM_ACTUAL_CAP, buf);
 	if (rc) {
 		pr_err("Failed to store actual capacity: %d\n", rc);
 		return rc;
@@ -3219,8 +3607,9 @@ static int fg_calc_and_store_cc_soc_coeff(struct fg_chip *chip, int16_t cc_mah)
 		pr_err("Failed to read mah_to_soc_conv_cs: %d\n", rc);
 	} else {
 		cc_to_soc_coeff = div64_s64(mah_to_soc, cc_mah);
-		rc = fg_set_sram_param(chip, FG_PARAM_ACTUAL_CAP,
-				(u8 *)&cc_to_soc_coeff);
+		fg_encode(chip->param[FG_PARAM_ACTUAL_CAP], cc_to_soc_coeff,
+				buf);
+		rc = fg_set_param(chip, FG_PARAM_ACTUAL_CAP, buf);
 		if (rc)
 			pr_err("Failed to write cc_soc_coeff_offset: %d\n",
 				rc);
@@ -3380,6 +3769,7 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 {
 	int rc = 0, battery_soc, cc_pc_val;
 	unsigned int cc_pc_100 = FULL_PERCENT_28BIT;
+	u8 buf[4];
 
 	mutex_lock(&chip->learning_data.learning_lock);
 	if (chip->status == POWER_SUPPLY_STATUS_CHARGING
@@ -3425,8 +3815,9 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 				goto fail;
 			}
 			/* reset SW_CC_SOC register to 100% */
-			rc = fg_set_sram_param(chip, FG_DATA_CHARGE_COUNTER,
-					(u8 *)&cc_pc_100);
+			fg_encode(chip->param[FG_DATA_CHARGE_COUNTER],
+					cc_pc_100, buf);
+			rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, buf);
 			if (rc)
 				pr_err("Failed to reset CC_SOC_REG rc=%d\n", rc);
 			fg_cap_learning_post_process(chip);
@@ -3435,8 +3826,8 @@ static int fg_cap_learning_check(struct fg_chip *chip)
 		fg_cap_learning_stop(chip);
 	} else if (chip->status == POWER_SUPPLY_STATUS_FULL) {
 		/* reset SW_CC_SOC register to 100% upon charge_full */
-		rc = fg_set_sram_param(chip, FG_DATA_CHARGE_COUNTER,
-				(u8 *)&cc_pc_100);
+		fg_encode(chip->param[FG_DATA_CHARGE_COUNTER], cc_pc_100, buf);
+		rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER, buf);
 		if (rc)
 			pr_err("Failed to reset CC_SOC_REG rc=%d\n", rc);
 	}
@@ -3535,7 +3926,7 @@ static void fg_status_change_work(struct work_struct *work)
 
 		batt_soc = div64_s64((int64_t)batt_soc *
 				FULL_PERCENT_28BIT, PMI8950_FULL_PERCENT_3B);
-		rc = fg_set_sram_param(chip, FG_DATA_CHARGE_COUNTER,
+		rc = fg_set_param(chip, FG_DATA_CHARGE_COUNTER,
 				(u8 *)&batt_soc);
 		if (rc)
 			pr_err("Failed to reset CC_SOC_REG rc=%d\n",
@@ -3754,6 +4145,7 @@ static const struct power_supply_desc bms_psy_desc = {
 static int fg_probe(struct platform_device *pdev)
 {
 	struct power_supply_config bms_cfg = {};
+	struct fg_pmic_data const *match_data;
 	struct fg_chip *chip;
 	int rc, i;
 
@@ -3777,12 +4169,21 @@ static int fg_probe(struct platform_device *pdev)
 	}
 
 	rc = of_property_read_u32(pdev->dev.of_node, "reg", &chip->soc_base);
-	chip->batt_base = chip->soc_base + 0x100;
-	chip->mem_base = chip->soc_base + 0x400;
 	if (rc) {
 		dev_err(chip->dev, "missing or invalid 'reg' property\n");
 		return rc;
 	}
+
+	chip->batt_base = chip->soc_base + 0x100;
+	chip->mem_base = chip->soc_base + 0x400;
+
+	match_data = device_get_match_data(chip->dev);
+	chip->pmic_version = match_data->pmic_version;
+	chip->param = match_data->params;
+	//chip->irqs = match_data->irqs;
+	printk("qcom-fg: PMI8950: %s\n", chip->pmic_version == PMI8950 ? "yes" : "no");
+	chip->do_restart = match_data->do_restart;
+	chip->rconn_config = match_data->rconn_config;
 
 	for (i = 0; i < ARRAY_SIZE(fg_irqs); ++i) {
 		chip->irqs[i] = platform_get_irq_byname(pdev, fg_irqs[i].name);
@@ -3804,44 +4205,26 @@ static int fg_probe(struct platform_device *pdev)
 		}
 	}
 
-	chip->pmic_version = (enum pmic) device_get_match_data(chip->dev);
-	switch (chip->pmic_version) {
-	case PMI8950:
-		chip->param = fg_params_pmi8950;
-		chip->init_fn = fg_hw_init_pmi8950;
-		break;
-	case PMI8998_V1:
-		chip->param = fg_params_pmi8998_v1;
-		chip->init_fn = fg_hw_init_pmi8998;
-		break;
-	case PMI8998_V2:
-		chip->param = fg_params_pmi8998_v2;
-		chip->init_fn = fg_hw_init_pmi8998;
-		break;
-	}
-
 	chip->status = POWER_SUPPLY_STATUS_DISCHARGING;
 
 	rc = fg_init_memif(chip);
 	if (rc) {
-		dev_err(chip->dev, "failed to init memif\n");
+		dev_err(chip->dev, "failed to init memif: %d\n", rc);
 		return rc;
 	}
 
 	rc = fg_of_init(chip);
 	if (rc) {
-		dev_err(chip->dev, "failed to get config from DTS\n");
+		dev_err(chip->dev, "failed to get config from DTS: %d\n", rc);
 		return rc;
 	}
 
 	rc = fg_of_battery_profile_init(chip);
-	if (rc) {
-		pr_err("profile init failed\n");
-	}
+	if (rc)
+		pr_err("profile init failed: %d\n", rc);
 
-	rc = chip->init_fn(chip);
 	if (rc) {
-		dev_err(chip->dev, "failed to init hw\n");
+		dev_err(chip->dev, "failed to init hw: %d\n", rc);
 		return rc;
 	}
 
@@ -3866,12 +4249,38 @@ static int fg_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct fg_pmic_data pmi8950_fg = {
+	.pmic_version		= PMI8950,
+	.params			= fg_params_pmi8950,
+	/*.irqs			= fg_irqs_pmi8950,
+	.init_irqs		= fg_init_irqs_pmi8950,
+	.status_change_work	= status_change_work_pmi8950,
+	.do_restart		= fg_do_restart_pmi8950,*/
+	.rconn_config		= fg_rconn_config_pmi8950,
+}, pmi8998v1_fg = {
+	.pmic_version		= PMI8998_V1,
+	.params			= fg_params_pmi8998_v1,
+	/*.irqs			= fg_irqs_pmi8998,
+	.init_irqs		= fg_init_irqs_pmi8998,
+	.status_change_work	= status_change_work_pmi8998,
+	.do_restart		= fg_do_restart_pmi8998,*/
+	.rconn_config		= fg_rconn_config_pmi8998,
+}, pmi8998v2_fg = {
+	.pmic_version		= PMI8998_V2,
+	.params			= fg_params_pmi8998_v2,
+	/*.irqs			= fg_irqs_pmi8998,
+	.status_change_work	= status_change_work_pmi8998,
+	.do_restart		= fg_do_restart_pmi8998,*/
+	.rconn_config		= fg_rconn_config_pmi8998,
+};
+
 static const struct of_device_id fg_match_id_table[] = {
-	{ .compatible = "qcom,pmi8950-fg", .data = (void *) PMI8950 },
-	{ .compatible = "qcom,pmi8998-v1-fg", .data = (void *) PMI8998_V1 },
-	{ .compatible = "qcom,pmi8998-v2-fg", .data = (void *) PMI8998_V2 },
+	{ .compatible = "qcom,pmi8950-fg", .data = &pmi8950_fg },
+	{ .compatible = "qcom,pmi8998-v1-fg", .data = &pmi8998v1_fg },
+	{ .compatible = "qcom,pmi8998-v2-fg", .data = &pmi8998v2_fg },
 	{ }
 };
+
 MODULE_DEVICE_TABLE(of, fg_match_id_table);
 
 static struct platform_driver qcom_fg_driver = {
