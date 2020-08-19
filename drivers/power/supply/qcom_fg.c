@@ -148,7 +148,6 @@ struct fg_sram_param {
 	u16	address;
 	u8	offset;
 	unsigned int length;
-	int value;
 
 	u8 type: 2;
 	u8 wa_flags: 6;
@@ -158,8 +157,6 @@ struct fg_sram_param {
 	int val_offset;
 	void (*encode)(struct fg_sram_param sp, int val, u8 *buf);
 	int (*decode)(struct fg_sram_param sp, u8* val);
-
-	const char *name;
 };
 
 static int fg_decode_voltage_15b(struct fg_sram_param sp, u8 *val);
@@ -187,10 +184,9 @@ static void fg_encode_default(struct fg_sram_param sp, int val, u8 *buf);
 #define PMI8950_FULL_PERCENT_3B	0xffffff
 #define MICRO_UNIT		1000000ULL
 
-#define FG_SRAM_PARAM_DEF(_name, of_name, addr, off, len, num, den, val_off,\
-		enc, dec, val) \
+#define FG_SRAM_PARAM_DEF(_name, addr, off, len, num, den, val_off,\
+		enc, dec) \
 	[FG_##_name] = { \
-		.name		= of_name,\
 		.address	= addr,\
 		.offset		= off,\
 		.length		= len,\
@@ -199,76 +195,75 @@ static void fg_encode_default(struct fg_sram_param sp, int val, u8 *buf);
 		.encode		= enc,\
 		.decode		= dec,\
 		.val_offset	= val_off,\
-		.value		= val,\
 	}
 
 static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
-	FG_SRAM_PARAM_DEF(DATA_BATT_TEMP, NULL, 0x550, 2, 2, 1000, 625, -2730, NULL,
-			fg_decode_value_16b, 0),
-	FG_SRAM_PARAM_DEF(DATA_CHARGE, NULL, 0x570, 0, 4, PMI8950_FULL_PERCENT_3B,
-			10000, 0, NULL, fg_decode_current, 0),
-	FG_SRAM_PARAM_DEF(DATA_OCV, NULL, 0x588, 3, 2, PMI8950_LSB_16B_NUMRTR,
-			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b, 0),
-	FG_SRAM_PARAM_DEF(DATA_VOLTAGE, NULL, 0x5cc, 1, 2, PMI8950_LSB_16B_NUMRTR,
-			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b, 0),
-	FG_SRAM_PARAM_DEF(DATA_CPRED_VOLTAGE, NULL, 0x540, 0, 2,
+	FG_SRAM_PARAM_DEF(DATA_BATT_TEMP, 0x550, 2, 2, 1000, 625, -2730, NULL,
+			fg_decode_value_16b),
+	FG_SRAM_PARAM_DEF(DATA_CHARGE, 0x570, 0, 4, PMI8950_FULL_PERCENT_3B,
+			10000, 0, NULL, fg_decode_current),
+	FG_SRAM_PARAM_DEF(DATA_OCV, 0x588, 3, 2, PMI8950_LSB_16B_NUMRTR,
+			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b),
+	FG_SRAM_PARAM_DEF(DATA_VOLTAGE, 0x5cc, 1, 2, PMI8950_LSB_16B_NUMRTR,
+			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_value_16b),
+	FG_SRAM_PARAM_DEF(DATA_CPRED_VOLTAGE, 0x540, 0, 2,
 			PMI8950_LSB_16B_NUMRTR, PMI8950_LSB_16B_DENMTR, 0, NULL,
-			fg_decode_value_16b, 0),
-	FG_SRAM_PARAM_DEF(DATA_CURRENT, NULL, 0x5cc, 3, 2, PMI8950_LSB_16B_NUMRTR,
-			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_current, 0),
-	FG_SRAM_PARAM_DEF(DATA_BATT_ESR, NULL, 0x544, 2, 2, 0, 0, 0, NULL,
-			fg_decode_float, 0),
-	FG_SRAM_PARAM_DEF(DATA_BATT_SOC, NULL, 0x56c, 1, 3, PMI8950_FULL_PERCENT_3B,
-			10000, 0, NULL, fg_decode_value_16b, 0),
-	FG_SRAM_PARAM_DEF(DATA_BATT_ESR_REG, NULL, 0x4f4, 2, 2, 0, 0, 0, NULL,
-			fg_decode_float, 0),
-	FG_SRAM_PARAM_DEF(DATA_NOM_CAP, NULL, 0x4f4, 0, 2, 1000, 0, 0, NULL,
-			fg_decode_value_le, 0),
-	FG_SRAM_PARAM_DEF(DATA_CYCLE_COUNT, NULL, 0x5e8, 0, 2, 0, 0, 0, NULL,
-			fg_decode_value_le, 0),
-	FG_SRAM_PARAM_DEF(PARAM_ACTUAL_CAP, NULL, 0x578, 2, 2, 0, 0, 0,
-			fg_encode_default, NULL, 0),
-	FG_SRAM_PARAM_DEF(PARAM_ACTUAL_CHARGE, NULL, 0x578, 0, 2, 0, 0, 0,
-			fg_encode_float, NULL, 0),
-	FG_SRAM_PARAM_DEF(DATA_CHARGE_COUNTER, NULL, 0x5bc, 3, 4, 0, 0, 0,
-			NULL, fg_decode_cc_soc_pmi8950, 0),
-	FG_SRAM_PARAM_DEF(SETTING_TERM_CURRENT, "qcom,term-current-ma", 0x40c,
+			fg_decode_value_16b),
+	FG_SRAM_PARAM_DEF(DATA_CURRENT, 0x5cc, 3, 2, PMI8950_LSB_16B_NUMRTR,
+			PMI8950_LSB_16B_DENMTR, 0, NULL, fg_decode_current),
+	FG_SRAM_PARAM_DEF(DATA_BATT_ESR, 0x544, 2, 2, 0, 0, 0, NULL,
+			fg_decode_float),
+	FG_SRAM_PARAM_DEF(DATA_BATT_SOC, 0x56c, 1, 3, PMI8950_FULL_PERCENT_3B,
+			10000, 0, NULL, fg_decode_value_16b),
+	FG_SRAM_PARAM_DEF(DATA_BATT_ESR_REG, 0x4f4, 2, 2, 0, 0, 0, NULL,
+			fg_decode_float),
+	FG_SRAM_PARAM_DEF(DATA_NOM_CAP, 0x4f4, 0, 2, 1000, 0, 0, NULL,
+			fg_decode_value_le),
+	FG_SRAM_PARAM_DEF(DATA_CYCLE_COUNT, 0x5e8, 0, 2, 0, 0, 0, NULL,
+			fg_decode_value_le),
+	FG_SRAM_PARAM_DEF(PARAM_ACTUAL_CAP, 0x578, 2, 2, 0, 0, 0,
+			fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(PARAM_ACTUAL_CHARGE, 0x578, 0, 2, 0, 0, 0,
+			fg_encode_float, NULL),
+	FG_SRAM_PARAM_DEF(DATA_CHARGE_COUNTER, 0x5bc, 3, 4, 0, 0, 0,
+			NULL, fg_decode_cc_soc_pmi8950),
+	FG_SRAM_PARAM_DEF(SETTING_TERM_CURRENT, 0x40c,
 			2, 2, PMI8950_LSB_16B_NUMRTR * 1000,
-			PMI8950_LSB_16B_DENMTR, 0, fg_encode_default, NULL, 250),
-	FG_SRAM_PARAM_DEF(SETTING_CHG_TERM_CURRENT, "qcom,chg-term-current-ma",
+			PMI8950_LSB_16B_DENMTR, 0, fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_CHG_TERM_CURRENT,
 			0x4f8, 2, 2, -PMI8950_LSB_16B_NUMRTR * 1000,
-			PMI8950_LSB_16B_DENMTR, 0, fg_encode_current, NULL, 0),
-	FG_SRAM_PARAM_DEF(SETTING_CUTOFF_VOLT, "qcom,cutoff-volt-mv",
+			PMI8950_LSB_16B_DENMTR, 0, fg_encode_current, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_CUTOFF_VOLT,
 			0x40c, 0, 2, PMI8950_LSB_16B_NUMRTR * 1000,
-			PMI8950_LSB_16B_DENMTR, 0, fg_encode_current, NULL, 3200),
-	FG_SRAM_PARAM_DEF(SETTING_EMPTY_VOLT, NULL, 0x458, 3, 1, 1, 9766, 0,
-			fg_encode_voltcmp8, NULL, 3100),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_LOW, "qcom,low-volt-thr", 0x458, 0, 1,
-			512, 1000, 0, fg_encode_roundoff, NULL, 4200),
-	FG_SRAM_PARAM_DEF(SETTING_DELTA_MSOC, "qcom,delta-soc-thr", 0x450, 3, 1,
-			255, 100, 0, fg_encode_roundoff, NULL, 1),
-	FG_SRAM_PARAM_DEF(SETTING_RECHARGE_THR, "qcom,recharge-thr", 0x45c, 1, 1,
-			256, 100, 0, fg_encode_default, NULL, 0),
-	FG_SRAM_PARAM_DEF(SETTING_BCL_LM_THR, "qcom,bcl-lm-thr-ma", 0x47c, 2, 1,
-			100, 976, 0, fg_encode_bcl, NULL, 50),
-	FG_SRAM_PARAM_DEF(SETTING_BCL_MH_THR, "qcom,bcl-mh-thr-ma", 0x47c, 3, 1,
-			100, 976, 0, fg_encode_bcl, NULL, 752),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_COOL_TEMP, "qcom,batt-cool-temp", 0x454,
-			0, 1, 0, 0, fg_encode_default, NULL, 100),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_WARM_TEMP, "qcom,batt-warm-temp", 0x454,
-			1, 1, 0, 0, fg_encode_default, NULL, 400),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_COLD_TEMP, "qcom,batt-cold-temp", 0x454,
-			2, 1, 0, 0, fg_encode_default, NULL, 50),
-	FG_SRAM_PARAM_DEF(SETTING_BATT_HOT_TEMP, "qcom,batt-hot-temp", 0x454,
-			3, 1, 0, 0, fg_encode_default, NULL, 450),
-	FG_SRAM_PARAM_DEF(SETTING_THERM_DELAY, "qcom,therm-delay-us", 0x4ac,
-			3, 0, fg_encode_therm_delay, NULL, 0),
-	FG_SRAM_PARAM_DEF(SETTING_CONST_CHARGE_VOLT_THR, "qcom,const-charge-volt-thr-mv",
-			0x4f4, 0, 2, 32768, 5000, 0, fg_encode_adc, NULL, -EINVAL),
-	FG_SRAM_PARAM_DEF(SETTING_RSLOW_CHG, NULL, 0x514, 2, 2, 0, 0, 0,
-			fg_encode_float, fg_decode_float, 0),
-	FG_SRAM_PARAM_DEF(SETTING_RSLOW_DISCHG, NULL, 0x514, 0, 2, 0, 0, 0,
-			fg_encode_float, fg_decode_float, 0),
+			PMI8950_LSB_16B_DENMTR, 0, fg_encode_current, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_EMPTY_VOLT, 0x458, 3, 1, 1, 9766, 0,
+			fg_encode_voltcmp8, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_LOW, 0x458, 0, 1,
+			512, 1000, 0, fg_encode_roundoff, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_DELTA_MSOC, 0x450, 3, 1,
+			255, 100, 0, fg_encode_roundoff, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_RECHARGE_THR, 0x45c, 1, 1,
+			256, 100, 0, fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BCL_LM_THR, 0x47c, 2, 1,
+			100, 976, 0, fg_encode_bcl, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BCL_MH_THR, 0x47c, 3, 1,
+			100, 976, 0, fg_encode_bcl, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_COOL_TEMP, 0x454,
+			0, 1, 0, 0, 0, fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_WARM_TEMP, 0x454,
+			1, 1, 0, 0, 0, fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_COLD_TEMP, 0x454,
+			2, 1, 0, 0, 0, fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_BATT_HOT_TEMP, 0x454,
+			3, 1, 0, 0, 0, fg_encode_default, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_THERM_DELAY, 0x4ac,
+			3, 0, 0, 0, 0, fg_encode_therm_delay, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_CONST_CHARGE_VOLT_THR,
+			0x4f4, 0, 2, 32768, 5000, 0, fg_encode_adc, NULL),
+	FG_SRAM_PARAM_DEF(SETTING_RSLOW_CHG, 0x514, 2, 2, 0, 0, 0,
+			fg_encode_float, fg_decode_float),
+	FG_SRAM_PARAM_DEF(SETTING_RSLOW_DISCHG, 0x514, 0, 2, 0, 0, 0,
+			fg_encode_float, fg_decode_float),
 	//TODO: change to setting?
 	[FG_DATA_VINT_ERR] = {
 		.address	= 0x560,
@@ -397,17 +392,14 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.decode 	= fg_decode_current,
 	},
 	[FG_SETTING_CUTOFF_VOLT] = {
-		.name		= "qcom,cutoff-volt-mv",
 		.address	= 5,
 		.offset		= 0,
 		.length		= 2,
 		.numrtr		= PMI8998_V1_LSB_15B_NUMRTR * 1000,
 		.denmtr		= PMI8998_V1_LSB_15B_DENMTR,
 		.encode		= fg_encode_voltage,
-		.value		= 3200,
 	},
 	[FG_SETTING_EMPTY_VOLT] = {
-		.name		= "qcom,empty-volt-mv",
 		.address	= 15,
 		.offset		= 0,
 		.length		= 1,
@@ -415,10 +407,8 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.denmtr		= PMI8998_V1_LSB_16B_DENMTR,
 		.val_offset	= -2500,
 		.encode		= fg_encode_voltage,
-		.value		= 2850,
 	},
 	[FG_SETTING_BATT_LOW] = {
-		.name		= "qcom,low-volt-thr",
 		.address	= 15,
 		.offset		= 1,
 		.length		= 1,
@@ -426,70 +416,56 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.denmtr		= PMI8998_V1_LSB_16B_DENMTR,
 		.val_offset	= -2500,
 		.encode		= fg_encode_voltage,
-		.value		= -EINVAL,
 	},
 	[FG_SETTING_CONST_CHARGE_VOLT_THR] = {
-		.name		= "qcom,const-charge-volt-thr-mv",
 		.address	= 7,
 		.offset		= 0,
 		.length		= 2,
 		.numrtr		= PMI8998_V1_LSB_15B_NUMRTR,
 		.denmtr		= PMI8998_V1_LSB_15B_DENMTR,
 		.encode		= fg_encode_voltage,
-		.value		= -EINVAL,
 	},
 	[FG_SETTING_TERM_CURRENT] = {
-		.name		= "qcom,term-current-ma",
 		.address	= 4,
 		.offset		= 0,
 		.length		= 3,
 		.numrtr		= 1000000,
 		.denmtr		= 122070,
 		.encode		= fg_encode_current,
-		.value		= 500,
 	},
 	[FG_SETTING_SYS_TERM_CURRENT] = {
-		.name		= "qcom,sys-term-current-ma",
 		.address	= 6,
 		.offset		= 0,
 		.length		= 3,
 		.numrtr		= 100000,
 		.denmtr		= 122070,
 		.encode		= fg_encode_current,
-		.value		= -125,
 	},
 	[FG_SETTING_CHG_TERM_CURRENT] = {
-		.name		= "qcom,chg-term-current-ma",
 		.address	= 14,
 		.offset		= 1,
 		.length		= 1,
 		.numrtr		= PMI8998_V1_LSB_16B_NUMRTR * 1000,
 		.denmtr		= PMI8998_V1_LSB_16B_DENMTR,
 		.encode		= fg_encode_current,
-		.value		= 100,
 	},
 	[FG_SETTING_DELTA_BSOC] = {
-		.name		= "qcom,delta-soc-thr",
 		.address	= 13,
 		.offset		= 2,
 		.length		= 1,
 		.numrtr		= 2048,
 		.denmtr		= 100,
 		.encode		= fg_encode_default,
-		.value		= 1,
 	},
 	[FG_SETTING_DELTA_MSOC] = {
-		.name		= "qcom,delta-soc-thr",
 		.address	= 12,
 		.offset		= 3,
 		.length		= 1,
 		.numrtr		= 2048,
 		.denmtr		= 100,
 		.encode		= fg_encode_default,
-		.value		= 1,
 	},
 	[FG_SETTING_RECHARGE_THR] = {
-		.name		= "qcom,recharge-thr",
 		.address	= 14,
 		.offset		= 0,
 		.length		= 1,
@@ -508,40 +484,32 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.length		= 1,
 	},
 	[FG_SETTING_BATT_COOL_TEMP] = {
-		.name		= "qcom,batt-cool-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x63,
 		.offset		= 0,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 100
 	},
 	[FG_SETTING_BATT_WARM_TEMP] = {
-		.name		= "qcom,batt-warm-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x64,
 		.offset		= 1,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 400
 	},
 	[FG_SETTING_BATT_COLD_TEMP] = {
-		.name		= "qcom,batt-cold-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x62,
 		.offset		= 2,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 50
 	},
 	[FG_SETTING_BATT_HOT_TEMP] = {
-		.name		= "qcom,batt-hot-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x65,
 		.offset		= 3,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 450
 	},
 };
 
@@ -639,17 +607,14 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.decode 	= fg_decode_current,
 	},
 	[FG_SETTING_CUTOFF_VOLT] = {
-		.name		= "qcom,cutoff-volt-mv",
 		.address	= 5,
 		.offset		= 0,
 		.length		= 2,
 		.numrtr		= PMI8998_V1_LSB_15B_NUMRTR * 1000,
 		.denmtr		= PMI8998_V1_LSB_15B_DENMTR,
 		.encode		= fg_encode_voltage,
-		.value		= 3200,
 	},
 	[FG_SETTING_EMPTY_VOLT] = {
-		.name		= "qcom,empty-volt-mv",
 		.address	= 15,
 		.offset		= 3,
 		.length		= 1,
@@ -657,7 +622,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.denmtr		= PMI8998_V1_LSB_16B_DENMTR,
 		.val_offset	= -2500,
 		.encode		= fg_encode_voltage,
-		.value		= 2850,
 	},
 	[FG_SETTING_MAX_VOLT] = {
 		.address	= 16,
@@ -669,7 +633,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.encode		= fg_encode_voltage,
 	},
 	[FG_SETTING_BATT_LOW] = {
-		.name		= "qcom,low-volt-thr",
 		.address	= 16,
 		.offset		= 1,
 		.length		= 1,
@@ -679,77 +642,62 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.encode		= fg_encode_voltage,
 	},
 	[FG_SETTING_CONST_CHARGE_VOLT_THR] = {
-		.name		= "qcom,const-charge-volt-thr-mv",
 		.address	= 7,
 		.offset		= 0,
 		.length		= 2,
 		.numrtr		= PMI8998_V1_LSB_15B_NUMRTR,
 		.denmtr		= PMI8998_V1_LSB_15B_DENMTR,
 		.encode		= fg_encode_voltage,
-		.value		= -EINVAL,
 	},
 	[FG_SETTING_TERM_CURRENT] = {
-		.name		= "qcom,term-current-ma",
 		.address	= 4,
 		.offset		= 0,
 		.length		= 3,
 		.numrtr		= 1000000,
 		.denmtr		= 122070,
 		.encode		= fg_encode_current,
-		.value		= 500,
 	},
 	[FG_SETTING_SYS_TERM_CURRENT] = {
-		.name		= "qcom,sys-term-current-ma",
 		.address	= 6,
 		.offset		= 0,
 		.length		= 3,
 		.numrtr		= 100000,
 		.denmtr		= 390625,
 		.encode		= fg_encode_current,
-		.value		= -125,
 	},
 	[FG_SETTING_CHG_TERM_CURRENT] = {
-		.name		= "qcom,chg-term-current-ma",
 		.address	= 14,
 		.offset		= 1,
 		.length		= 1,
 		.numrtr		= PMI8998_V1_LSB_16B_NUMRTR * 1000,
 		.denmtr		= PMI8998_V1_LSB_16B_DENMTR,
 		.encode		= fg_encode_current,
-		.value		= 100,
 	},
 	[FG_SETTING_CHG_TERM_BASE_CURRENT] = {
-		.name		= "qcom,chg-term-base-current-ma",
 		.address	= 15,
 		.offset		= 0,
 		.length		= 1,
 		.numrtr		= 1024,
 		.denmtr		= 1000,
 		.encode		= fg_encode_current,
-		.value		= 75,
 	},
 	[FG_SETTING_DELTA_BSOC] = {
-		.name		= "qcom,delta-soc-thr",
 		.address	= 13,
 		.offset		= 2,
 		.length		= 1,
 		.numrtr		= 2048,
 		.denmtr		= 100,
 		.encode		= fg_encode_default,
-		.value		= 1,
 	},
 	[FG_SETTING_DELTA_MSOC] = {
-		.name		= "qcom,delta-soc-thr",
 		.address	= 12,
 		.offset		= 3,
 		.length		= 1,
 		.numrtr		= 2048,
 		.denmtr		= 100,
 		.encode		= fg_encode_default,
-		.value		= 1,
 	},
 	[FG_SETTING_RECHARGE_THR] = {
-		.name		= "qcom,recharge-thr",
 		.address	= 14,
 		.offset		= 0,
 		.length		= 1,
@@ -758,7 +706,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.encode		= fg_encode_default,
 	},
 	[FG_SETTING_RECHARGE_VOLT_THR] = {
-		.name		= "qcom,recharge-volt-thr-mv",
 		.address	= 16,
 		.offset		= 1,
 		.length		= 1,
@@ -766,7 +713,6 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.denmtr		= 15625,
 		.val_offset	= -2000,
 		.encode		= fg_encode_voltage,
-		.value		= 4250,
 	},
 	[FG_SETTING_RSLOW_DISCHG] = {
 		.address	= 34,
@@ -779,40 +725,32 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.length		= 1,
 	},
 	[FG_SETTING_BATT_COOL_TEMP] = {
-		.name		= "qcom,batt-cool-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x63,
 		.offset		= 0,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 100
 	},
 	[FG_SETTING_BATT_WARM_TEMP] = {
-		.name		= "qcom,batt-warm-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x64,
 		.offset		= 1,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 400
 	},
 	[FG_SETTING_BATT_COLD_TEMP] = {
-		.name		= "qcom,batt-cold-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x62,
 		.offset		= 2,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 50
 	},
 	[FG_SETTING_BATT_HOT_TEMP] = {
-		.name		= "qcom,batt-hot-temp",
 		.type		= BATT_BASE_PARAM,
 		.address	= 0x65,
 		.offset		= 3,
 		.length		= 1,
 		.encode		= fg_encode_default,
-		.value		= 450
 	},
 };
 
@@ -874,6 +812,40 @@ enum fg_irq_names {
 	FG_IRQS_MAX
 };
 
+enum esr_timer_config {
+	TIMER_RETRY = 0,
+	TIMER_MAX,
+	NUM_ESR_TIMERS,
+};
+
+struct fg_dt_props {
+	int term_current_ma;
+	int chg_term_current_ma;
+	int chg_term_base_current_ma;
+	int sys_term_current_ma;
+	int cutoff_volt_mv;
+	int recharge_thr;
+	int recharge_volt_thr_mv;
+	int const_charge_volt_mv;
+	int cool_temp;
+	int warm_temp;
+	int hot_temp;
+	int cold_temp;
+	int empty_irq_volt_mv;
+	int low_volt_thr_mv;
+	int bcl_lm_ma;
+	int bcl_mh_ma;
+	int esr_timer_charging[NUM_ESR_TIMERS];
+	int esr_timer_awake[NUM_ESR_TIMERS];
+	int esr_timer_asleep[NUM_ESR_TIMERS];
+	int esr_timer_shutdown[NUM_ESR_TIMERS];
+	int esr_tight_flt_upct;
+	int esr_broad_flt_upct;
+	int esr_pulse_thresh_ma;
+	int esr_meas_curr_ma;
+	int vbatt_est_diff;
+};
+
 struct fg_chip {
 	struct device *dev;
 	struct regmap *regmap;
@@ -894,6 +866,7 @@ struct fg_chip {
 
 	struct fg_sram_param *param;
 	struct battery_info batt_info;
+	struct fg_dt_props dt;
 
 	struct fg_learning_data learning_data;
 	struct fg_rslow_data rslow_comp;
@@ -1371,12 +1344,12 @@ static void fg_encode_bcl(struct fg_sram_param sp, int val, u8 *buf)
 
 static void fg_encode_therm_delay(struct fg_sram_param sp, int val, u8 *buf)
 {
-	if (sp.value < 2560)
+	if (val < 2560)
 		buf[0] = 0;
-	else if (sp.value > 163840)
+	else if (val > 163840)
 		buf[0] = 7;
 	else
-		buf[0] = ilog2(sp.value / 10) - 7;
+		buf[0] = ilog2(val / 10) - 7;
 }
 
 static void fg_encode_adc(struct fg_sram_param sp, int val, u8 *buf)
@@ -2281,7 +2254,7 @@ static int fg_set_sram_param(struct fg_chip *chip, enum fg_sram_param_id id,
 		return -EINVAL;
 
 	if (param.encode) {
-		param.encode(param, param.value, buf);
+		param.encode(param, *(int *)val, buf);
 		return fg_sram_write(chip, buf, param.address, param.length,
 				param.offset, false);
 	} else {
@@ -2538,8 +2511,8 @@ static int fg_get_capacity(struct fg_chip *chip, int *val)
 static int fg_get_temperature(struct fg_chip *chip, int *val)
 {
 	int rc, temp;
-	int cold = chip->param[FG_SETTING_BATT_COLD_TEMP].value;
-	int cool = chip->param[FG_SETTING_BATT_COOL_TEMP].value;
+	int cold = chip->dt.cold_temp;
+	int cool = chip->dt.cool_temp;
 
 	rc = fg_get_param(chip, FG_DATA_BATT_TEMP, &temp);
 	if (rc) {
@@ -2561,9 +2534,9 @@ static int fg_get_health_status(struct fg_chip *chip)
 		return rc;
 	}
 
-	if (temp >= chip->param[FG_SETTING_BATT_HOT_TEMP].value)
+	if (temp >= chip->dt.hot_temp)
 		chip->health = POWER_SUPPLY_HEALTH_OVERHEAT;
-	else if (temp <= chip->param[FG_SETTING_BATT_COLD_TEMP].value)
+	else if (temp <= chip->dt.cold_temp)
 		chip->health = POWER_SUPPLY_HEALTH_COLD;
 	else
 		chip->health = POWER_SUPPLY_HEALTH_GOOD;
@@ -3000,47 +2973,105 @@ done:
 	return rc;
 }
 
-static int fg_parse_of_param(struct fg_chip *chip, enum fg_sram_param_id id)
-{
-	int rc, temp;
-	struct fg_sram_param param = chip->param[id];
-
-	if (!param.name)
-		return 0;
-
-	rc = of_property_read_u32(chip->dev->of_node, param.name, &temp);
-	if (rc) {
-		if (param.value == -EINVAL) {//ignore optional prop
-			pr_warn("prop %s not found in dts, ignoring\n", param.name);
-			return 0;
-		}
-		pr_warn("using default value for prop %s: %d\n", param.name, param.value);
-		temp = param.value; //default value
-	}
-	chip->param[id].value = temp;
-
-	if (!param.length)
-		//0 length indicates its a masked write thingy
-		return 0;
-
-	return fg_set_sram_param(chip, id, (u8 *)&temp);
-}
-
 static int fg_of_init(struct fg_chip *chip)
 {
 	int rc, i;
-
-	for (i = FG_SETTING_TERM_CURRENT; i < FG_PARAM_MAX; ++i) {
-		rc = fg_parse_of_param(chip, i);
-		if (rc) {
-			pr_err("failed to write property %d\n", i);
-			return rc;
-		}
+	/* default values */
+	switch (chip->pmic_version) {
+	case PMI8950:
+		chip->dt.term_current_ma = 250;
+		chip->dt.chg_term_current_ma = 250;
+		chip->dt.empty_irq_volt_mv = 3100;
+		break;
+	case PMI8998_V1:
+		chip->dt.term_current_ma = 500;
+		chip->dt.chg_term_current_ma = 100;
+		chip->dt.sys_term_current_ma = -125;
+		chip->dt.empty_irq_volt_mv = 2850;
+		chip->dt.recharge_thr = 95;
+		break;
+	case PMI8998_V2:
+		chip->dt.term_current_ma = 500;
+		chip->dt.chg_term_current_ma = 100;
+		chip->dt.chg_term_base_current_ma = 75;
+		chip->dt.sys_term_current_ma = -125;
+		chip->dt.empty_irq_volt_mv = 2850;
+		chip->dt.recharge_volt_thr_mv = 4250;
+		chip->dt.recharge_thr = 95;
+		break;
+	default:
+		return -EINVAL;
 	}
 
+	chip->dt.cutoff_volt_mv = 3200;
+	chip->dt.bcl_lm_ma = 50;
+	chip->dt.bcl_mh_ma = 752;
+	chip->dt.cool_temp = 100;
+	chip->dt.warm_temp = 400;
+	chip->dt.cold_temp = 50;
+	chip->dt.hot_temp = 450;
+	chip->dt.esr_pulse_thresh_ma = 110;
+	chip->dt.esr_tight_flt_upct = 3907;
+	chip->dt.esr_broad_flt_upct = 99610;
+	chip->dt.esr_meas_curr_ma = 120;
+
 	of_property_read_u32(chip->dev->of_node,
-			"qcom,vbat-estimate-diff-mv",
-			&chip->vbatt_est_diff);
+		"qcom,term-current-ma", &chip->dt.term_current_ma);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,chg-term-current-ma", &chip->dt.term_current_ma);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,cutoff-volt-mv", &chip->dt.cutoff_volt_mv);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,const-charge-volt-mv", &chip->dt.const_charge_volt_mv);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,recharge-thr", &chip->dt.recharge_thr);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,bcl-lm-thr-ma", &chip->dt.bcl_lm_ma);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,bcl-mh-thr-ma", &chip->dt.bcl_mh_ma);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,cool-temp-c", &chip->dt.cool_temp);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,warm-temp-c", &chip->dt.warm_temp);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,cold-temp-c", &chip->dt.cold_temp);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,hot-temp-c", &chip->dt.hot_temp);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,empty-irq-volt-mv", &chip->dt.empty_irq_volt_mv);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,low-volt-thr-mv", &chip->dt.low_volt_thr_mv);
+
+	of_property_read_u32(chip->dev->of_node,
+		"qcom,vbat-estimate-diff-mv", &chip->dt.vbatt_est_diff);
+
+	of_property_read_u32_array(chip->dev->of_node,
+		"qcom,fg-esr-timer-charging",
+		chip->dt.esr_timer_charging, NUM_ESR_TIMERS);
+
+	of_property_read_u32_array(chip->dev->of_node,
+		"qcom,fg-esr-timer-awake",
+		chip->dt.esr_timer_awake, NUM_ESR_TIMERS);
+
+	of_property_read_u32_array(chip->dev->of_node,
+		"qcom,fg-esr-timer-asleep",
+		chip->dt.esr_timer_asleep, NUM_ESR_TIMERS);
+
+	of_property_read_u32_array(chip->dev->of_node,
+		"qcom,fg-esr-timer-shutdown",
+		chip->dt.esr_timer_shutdown, NUM_ESR_TIMERS);
 
 	if (of_property_read_bool(chip->dev->of_node,
 				"qcom,capacity-learning-on"))
@@ -3053,7 +3084,7 @@ static int fg_of_init(struct fg_chip *chip)
 			"qcom,fg-reset-on-lockup");
 
 	rc = of_property_read_u32(chip->dev->of_node, "qcom,fg-rconn-mohm",
-					&chip->batt_info.rconn_mohm);
+			&chip->batt_info.rconn_mohm);
 	if (rc)
 		chip->batt_info.rconn_mohm = 1;
 
@@ -3684,8 +3715,7 @@ static int fg_get_property(struct power_supply *psy,
 		val->intval = chip->learning_data.cc_uah;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT:
-		temp = chip->param[FG_SETTING_CHG_TERM_CURRENT].value * 1000;
-		val->intval = temp;
+		val->intval = chip->dt.chg_term_current_ma * 1000;
 		break;
 	case POWER_SUPPLY_PROP_STATUS:
 		val->intval = chip->status;
