@@ -25,7 +25,7 @@
 #define RAM_OFFSET				0x400
 
 /* Bit/Mask definitions */
-#define FULL_PERCENT				0xFF
+#define FULL_PERCENT				0xff
 #define MAX_TRIES_SOC				5
 #define MA_MV_BIT_RES				39
 #define MSB_SIGN				BIT(7)
@@ -34,6 +34,8 @@
 #define REDO_FIRST_ESTIMATE			BIT(3)
 #define RESTART_GO				BIT(0)
 #define THERM_DELAY_MASK			0xe0
+#define JEITA_HARD_HOT_RT_STS			BIT(6)
+#define JEITA_HARD_COLD_RT_STS			BIT(5)
 
 /* Registers */
 #define BATT_CAPACITY_REG(chip) 		(chip->soc_base + 0x09)
@@ -56,6 +58,8 @@
 #define MEM_INTF_RD_DATA0(chip)			(chip->mem_base + 0x67)
 #define MEM_INTF_DMA_STS(chip)			(chip->mem_base + 0x70)
 #define MEM_INTF_DMA_CTL(chip)			(chip->mem_base + 0x71)
+
+#define BATT_INFO_STS(chip)			(chip->batt_base + 0x09)
 
 /* Gen3 FG specific: */
 #define BATT_SOC_RESTART(chip)			(chip->batt_base + 0x48)
@@ -1033,13 +1037,6 @@ struct fg_dt_props {
 	int ki_coeff_hi_dischg[KI_COEFF_SOC_LEVELS];
 };
 
-enum temperature {
-	BATT_WARM,
-	BATT_COOL,
-	BATT_HOT,
-	BATT_COLD
-};
-
 struct fg_chip {
 	struct device *dev;
 	struct regmap *regmap;
@@ -1081,7 +1078,6 @@ struct fg_chip {
 	int awake_status;
 	int charge_status;
 	int prev_charge_status;
-	enum temperature temp_status;
 	int esr_timer_charging_default[NUM_ESR_TIMERS];
 	int vbatt_est_diff;
 	int batt_temp;
@@ -1108,6 +1104,10 @@ struct fg_chip {
 	bool first_profile_loaded;
 	bool fg_restarting;
 	bool soc_reporting_ready;
+	bool batt_hot;
+	bool batt_cold;
+	bool batt_cool;
+	bool batt_warm;
 
 	struct alarm hard_jeita_alarm;
 	struct alarm esr_filter_alarm;
@@ -1130,7 +1130,6 @@ static void fg_rslow_update(struct fg_chip *chip);
 static void fg_update_esr_values(struct fg_chip *chip);
 static void fg_cycle_counter_update(struct fg_chip *chip);
 
-#define REASONABLY_BIG_TIMEOUT_MS	5000
 static irqreturn_t fg_soc_irq_handler(int irq, void *_chip)
 {
 	struct fg_chip *chip = _chip;
@@ -1151,7 +1150,7 @@ static irqreturn_t fg_soc_irq_handler(int irq, void *_chip)
 			chip->rslow_comp.chg_rslow_comp_c2 > 0)
 		fg_rslow_update(chip);
 
-	if (chip->batt_info.cyc_ctr_en)
+	if (chip->cyc_ctr.en)
 		fg_cycle_counter_update(chip);
 
 	fg_update_esr_values(chip);
@@ -1198,17 +1197,19 @@ static irqreturn_t fg_first_soc_irq_handler(int irq, void *_chip)
 	return IRQ_HANDLED;
 }
 
+static bool is_charger_available(struct fg_chip *chip);
+
 #define BATT_SOFT_COLD_STS	BIT(0)
 #define BATT_SOFT_HOT_STS	BIT(1)
 #define HARD_JEITA_ALARM_CHECK_NS	10000000000
 static irqreturn_t fg_jeita_soft_hot_irq_handler(int irq, void *_chip)
 {
-	int rc;
+	int rc, regval;
 	struct fg_chip *chip = _chip;
-	int regval;
 	bool batt_warm;
+	union power_supply_propval val = {0, };
 
-	if (chip->temp_status == BATT_WARM)
+	if (!is_charger_available(chip))
 		return IRQ_HANDLED;
 
 	rc = regmap_read(chip->regmap, INT_RT_STS(chip->batt_base), &regval);
@@ -1218,10 +1219,18 @@ static irqreturn_t fg_jeita_soft_hot_irq_handler(int irq, void *_chip)
 	}
 
 	batt_warm = !!(regval & BATT_SOFT_HOT_STS);
+	if (chip->batt_warm == batt_warm)
+		return IRQ_HANDLED;
+
+	chip->batt_warm = batt_warm;
+
 	if (batt_warm) {
 		alarm_start_relative(&chip->hard_jeita_alarm,
 				ns_to_ktime(HARD_JEITA_ALARM_CHECK_NS));
 	} else {
+		val.intval = POWER_SUPPLY_HEALTH_GOOD;
+		power_supply_set_property(chip->batt_psy,
+			POWER_SUPPLY_PROP_HEALTH, &val);
 		alarm_try_to_cancel(&chip->hard_jeita_alarm);
 	}
 
@@ -1230,10 +1239,13 @@ static irqreturn_t fg_jeita_soft_hot_irq_handler(int irq, void *_chip)
 
 static irqreturn_t fg_jeita_soft_cold_irq_handler(int irq, void *_chip)
 {
-	int rc;
+	int rc, regval;
 	struct fg_chip *chip = _chip;
-	int regval;
 	bool batt_cool;
+	union power_supply_propval val = {0, };
+
+	if (!is_charger_available(chip))
+		return IRQ_HANDLED;
 
 	rc = regmap_read(chip->regmap, INT_RT_STS(chip->batt_base), &regval);
 	if (rc) {
@@ -1242,10 +1254,17 @@ static irqreturn_t fg_jeita_soft_cold_irq_handler(int irq, void *_chip)
 	}
 
 	batt_cool = !!(regval & BATT_SOFT_COLD_STS);
+	if (chip->batt_cool == batt_cool)
+		return IRQ_HANDLED;
+
+	chip->batt_cool = batt_cool;
 	if (batt_cool) {
 		alarm_start_relative(&chip->hard_jeita_alarm,
 				ns_to_ktime(HARD_JEITA_ALARM_CHECK_NS));
 	} else {
+		val.intval = POWER_SUPPLY_HEALTH_GOOD;
+		power_supply_set_property(chip->batt_psy,
+			POWER_SUPPLY_PROP_HEALTH, &val);
 		alarm_try_to_cancel(&chip->hard_jeita_alarm);
 	}
 
@@ -2085,7 +2104,7 @@ static int fg_check_and_clear_ima_errors(struct fg_chip *chip)
 	 * exception errors.
 	 */
 	if ((hw_sts & 0x0F) != hw_sts >> 4) {
-		pr_err("IMA HW not in correct state, hw_sts=%x\n",
+		dev_err(chip->dev, "IMA HW not in correct state, hw_sts=%x\n",
 				hw_sts);
 		run_err_clr_seq = true;
 	}
@@ -2093,14 +2112,15 @@ static int fg_check_and_clear_ima_errors(struct fg_chip *chip)
 	if (exp_sts & (IACS_ERR_BIT | XCT_ERR_BIT | DATA_RD_ERR_BIT |
 		DATA_WR_ERR_BIT | ADDR_BURST_WRAP_BIT | ADDR_RNG_ERR_BIT |
 		ADDR_SRC_ERR_BIT)) {
-		pr_err("IMA exception bit set, exp_sts=%x\n", exp_sts);
+		dev_err(chip->dev, "IMA exception bit set, exp_sts=%x\n",
+				exp_sts);
 		run_err_clr_seq = true;
 	}
 
 	if (run_err_clr_seq) {
 		ret = fg_run_iacs_clear_sequence(chip);
 		if (ret) {
-			pr_err("Error clearing IMA exception ret=%d\n", ret);
+			dev_err(chip->dev, "failed to clear IMA error: %d\n", ret);
 			return ret;
 		}
 
@@ -3146,6 +3166,73 @@ static bool is_parallel_charger_available(struct fg_chip *chip)
 		return false;
 
 	return true;
+}
+
+#define HARD_JEITA_ALARM_CHECK_NS	10000000000
+static enum alarmtimer_restart fg_hard_jeita_alarm_cb(struct alarm *alarm,
+						ktime_t now)
+{
+	struct fg_chip *chip = container_of(alarm,
+			struct fg_chip, hard_jeita_alarm);
+	int rc, health = POWER_SUPPLY_HEALTH_UNKNOWN, regval;
+	bool batt_hot, batt_cold;
+	union power_supply_propval val = {0, };
+
+	if (!is_usb_present(chip))
+		return ALARMTIMER_NORESTART;
+
+	rc = regmap_read(chip->regmap, BATT_INFO_STS(chip), &regval);
+	if (rc) {
+		dev_err(chip->dev, "failed to get batt_sts: %d\n", rc);
+		goto recheck;
+	}
+
+	batt_hot = !!(regval & JEITA_HARD_HOT_RT_STS);
+	batt_cold = !!(regval & JEITA_HARD_COLD_RT_STS);
+	if (batt_hot && batt_cold) {
+		dev_err(chip->dev, "Hot && cold can't co-exist\n");
+		goto recheck;
+	}
+
+	if ((batt_hot == chip->batt_hot) && (batt_cold == chip->batt_cold))
+		goto recheck;
+
+	if (batt_cold != chip->batt_cold) {
+		/* cool --> cold */
+		if (chip->batt_cool) {
+			chip->batt_cool = false;
+			chip->batt_cold = true;
+			health = POWER_SUPPLY_HEALTH_COLD;
+		} else if (chip->batt_cold) { /* cold --> cool */
+			chip->batt_cool = true;
+			chip->batt_cold = false;
+		}
+	}
+
+	if (batt_hot != chip->batt_hot) {
+		/* warm --> hot */
+		if (chip->batt_warm) {
+			chip->batt_warm = false;
+			chip->batt_hot = true;
+			health = POWER_SUPPLY_HEALTH_OVERHEAT;
+		} else if (chip->batt_hot) { /* hot --> warm */
+			chip->batt_hot = false;
+			chip->batt_warm = true;
+		}
+	}
+
+	if (health != POWER_SUPPLY_HEALTH_UNKNOWN) {
+		val.intval = health;
+		rc = power_supply_set_property(chip->batt_psy,
+				POWER_SUPPLY_PROP_HEALTH, &val);
+		if (rc)
+			dev_err(chip->dev, "failed to set batt_psy health: %d\n",
+					rc);
+	}
+
+recheck:
+	alarm_forward_now(alarm, ns_to_ktime(HARD_JEITA_ALARM_CHECK_NS));
+	return ALARMTIMER_RESTART;
 }
 
 #define FG_ESR_FILTER_RESTART_MS	60000
@@ -4963,10 +5050,107 @@ int fg_check_and_clear_dma_errors(struct fg_chip *chip)
 	return 0;
 }
 
+#define TEMP_RS_TO_RSLOW_REG		0x514
+#define RS_TO_RSLOW_CHG_OFFSET		2
+#define RS_TO_RSLOW_DISCHG_OFFSET	0
+#define RSLOW_THRESH_REG		0x52c
+#define RSLOW_THRESH_OFFSET		0
+#define RSLOW_COMP_REG			0x528
+#define RSLOW_COMP_C1_OFFSET		0
+#define RSLOW_COMP_C2_OFFSET		2
+static int fg_rslow_charge_comp_set(struct fg_chip *chip)
+{
+	int rc;
+	u8 buffer[2];
+	/* we just need length to be able to use for encoding */
+	struct fg_sram_param rslow_param = {
+		.length		= 2,
+	};
+
+	mutex_lock(&chip->rslow_comp.lock);
+
+	rc = fg_sram_masked_write(chip, RSLOW_CFG_REG,
+			RSLOW_CFG_MASK, RSLOW_CFG_ON_VAL, RSLOW_CFG_OFFSET);
+	if (rc) {
+		dev_err(chip->dev, "failed to write rslow cfg: %d\n", rc);
+		return rc;
+	}
+	rc = fg_sram_masked_write(chip, RSLOW_THRESH_REG,
+			0xff, RSLOW_THRESH_FULL_VAL, RSLOW_THRESH_OFFSET);
+	if (rc) {
+		dev_err(chip->dev, "failed to write rslow thr: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode_float(rslow_param, chip->rslow_comp.chg_rs_to_rslow, buffer);
+	rc = fg_sram_write(chip, buffer,
+			TEMP_RS_TO_RSLOW_REG, 2, RS_TO_RSLOW_CHG_OFFSET, 0);
+	if (rc) {
+		dev_err(chip->dev, "failed to write rs to rslow: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode_float(rslow_param, chip->rslow_comp.chg_rslow_comp_c1, buffer);
+	rc = fg_sram_write(chip, buffer,
+			RSLOW_COMP_REG, 2, RSLOW_COMP_C1_OFFSET, 0);
+	if (rc) {
+		dev_err(chip->dev, "failed to write rslow comp: %d\n", rc);
+		return rc;
+	}
+
+	fg_encode_float(rslow_param, chip->rslow_comp.chg_rslow_comp_c2, buffer);
+	rc = fg_sram_write(chip, buffer,
+			RSLOW_COMP_REG, 2, RSLOW_COMP_C2_OFFSET, 0);
+	if (rc) {
+		dev_err(chip->dev, "failed to write rslow comp: %d\n", rc);
+		return rc;
+	}
+
+	chip->rslow_comp.active = true;
+
+	return rc;
+}
+
+#define RSLOW_CFG_ORIG_MASK	(BIT(4) | BIT(5))
+static int fg_rslow_charge_comp_clear(struct fg_chip *chip)
+{
+	u8 reg;
+	int rc;
+
+	reg = chip->rslow_comp.rslow_cfg & RSLOW_CFG_ORIG_MASK;
+	rc = fg_sram_masked_write(chip, RSLOW_CFG_REG,
+			RSLOW_CFG_MASK, reg, RSLOW_CFG_OFFSET);
+	if (rc) {
+		dev_err(chip->dev, "unable to write rslow cfg: %d\n", rc);
+		goto done;
+	}
+	rc = fg_sram_masked_write(chip, RSLOW_THRESH_REG,
+			0xff, chip->rslow_comp.rslow_thr, RSLOW_THRESH_OFFSET);
+	if (rc) {
+		dev_err(chip->dev, "unable to write rslow thresh: %d\n", rc);
+		goto done;
+	}
+
+	rc = fg_sram_write(chip, chip->rslow_comp.rs_to_rslow,
+			TEMP_RS_TO_RSLOW_REG, 2, RS_TO_RSLOW_CHG_OFFSET, 0);
+	if (rc) {
+		dev_err(chip->dev, "unable to write rs to rslow: %d\n", rc);
+		goto done;
+	}
+	rc = fg_sram_write(chip, chip->rslow_comp.rslow_comp,
+			RSLOW_COMP_REG, 4, RSLOW_COMP_C1_OFFSET, 0);
+	if (rc) {
+		dev_err(chip->dev, "unable to write rslow comp: %d\n", rc);
+		goto done;
+	}
+	chip->rslow_comp.active = false;
+
+done:
+	return rc;
+}
+
 static void fg_rslow_update(struct fg_chip *chip)
 {
-#if 0
-TODO:
 	int battery_soc_1b;
 
 	int rc = fg_get_param(chip, FG_DATA_BATT_SOC, &battery_soc_1b);
@@ -4986,7 +5170,6 @@ TODO:
 		if (chip->rslow_comp.active)
 			fg_rslow_charge_comp_clear(chip);
 	}
-#endif
 }
 
 static bool fg_is_temperature_ok_for_learning(struct fg_chip *chip)
@@ -5946,6 +6129,9 @@ static int fg_probe(struct platform_device *pdev)
 	if (chip->pmic_version != PMI8950)
 		alarm_init(&chip->esr_filter_alarm, ALARM_BOOTTIME,
 				fg_esr_filter_alarm_cb);
+	else
+		alarm_init(&chip->hard_jeita_alarm, ALARM_BOOTTIME,
+				fg_hard_jeita_alarm_cb);
 
 	chip->status = POWER_SUPPLY_STATUS_DISCHARGING;
 
