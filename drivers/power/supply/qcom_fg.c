@@ -119,7 +119,6 @@ enum fg_sram_param_id {
 	FG_PARAM_MONOTONIC_SOC,
 	FG_SETTING_RSLOW_CHG,
 	FG_SETTING_RSLOW_DISCHG,
-	FG_SETTING_THERMAL_COEFFS,
 	//Settings below this have corresponding dt entries
 	FG_SETTING_TERM_CURRENT,
 	FG_SETTING_SYS_TERM_CURRENT,
@@ -270,11 +269,6 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 			fg_encode_float, fg_decode_float),
 	FG_SRAM_PARAM_DEF(SETTING_RSLOW_DISCHG, 0x514, 0, 2, 0, 0, 0,
 			fg_encode_float, fg_decode_float),
-	[FG_SETTING_THERMAL_COEFFS] = {
-		.address	= 0x444,
-		.offset		= 2,
-		.length		= 0,
-	},
 	FG_SRAM_PARAM_DEF(PARAM_MONOTONIC_SOC,
 			0x574, 2, 2, 0, 0, 0, NULL, NULL),
 	FG_SRAM_PARAM_DEF(PROFILE_INTEGRITY,
