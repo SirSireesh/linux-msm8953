@@ -137,6 +137,7 @@ enum fg_sram_param_id {
 	FG_SETTING_DELTA_BSOC,
 	FG_SETTING_BCL_LM_THR,
 	FG_SETTING_BCL_MH_THR,
+	FG_PROFILE_INTEGRITY,
 	FG_SETTING_ESR_TIMER_DISCHG_MAX,
 	FG_SETTING_ESR_TIMER_DISCHG_INIT,
 	FG_SETTING_ESR_TIMER_CHG_MAX,
@@ -285,6 +286,8 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 	},
 	FG_SRAM_PARAM_DEF(PARAM_MONOTONIC_SOC,
 			0x574, 2, 2, 0, 0, 0, NULL, NULL),
+	FG_SRAM_PARAM_DEF(PROFILE_INTEGRITY,
+			0x53c, 0, 1, 0, 0, 0, NULL, NULL),
 };
 
 /*
@@ -589,6 +592,11 @@ static struct fg_sram_param fg_params_pmi8998_v1[FG_PARAM_MAX] = {
 		.address	= 94,
 		.offset		= 2,
 		.length		= 2,
+	},
+	[FG_PROFILE_INTEGRITY] = {
+		.address	= 79,
+		.offset		= 1,
+		.length		= 3,
 	},
 };
 
@@ -902,6 +910,11 @@ static struct fg_sram_param fg_params_pmi8998_v2[FG_PARAM_MAX] = {
 		.offset		= 2,
 		.length		= 2,
 	},
+	[FG_PROFILE_INTEGRITY] = {
+		.address	= 79,
+		.offset		= 1,
+		.length		= 3,
+	},
 };
 
 struct fg_capacity_learning_data {
@@ -1074,6 +1087,8 @@ struct fg_chip {
 
 	struct fg_capacity_learning_data cl;
 	struct fg_rslow_data rslow_comp;
+
+	int last_cap;
 	int health;
 	int status;
 	int prev_status;
@@ -1088,6 +1103,7 @@ struct fg_chip {
 	int esr_flt_sts;
 
 	struct work_struct status_change_work;
+	struct delayed_work profile_load_work;
 
 	bool irqs_enabled;
 	bool full_soc_irq_enabled;
@@ -1139,15 +1155,6 @@ static irqreturn_t fg_soc_irq_handler(int irq, void *_chip)
 
 	if (!chip->power_supply_registered)
 		return IRQ_HANDLED;
-
-	/*
-	 * This irq doesn't actually depend on first_soc_done
-	 * We just need to wait for some time after init,
-	 * otherwise it just causes the driver to hang while trying to
-	 * read rslow values from sram
-	 */
-	wait_for_completion_interruptible_timeout(&chip->first_soc_done,
-			msecs_to_jiffies(REASONABLY_BIG_TIMEOUT_MS));
 
 	power_supply_changed(chip->bms_psy);
 
@@ -1477,7 +1484,6 @@ static irqreturn_t fg_delta_batt_temp_irq_handler(int irq, void *data)
 }
 
 static void clear_cycle_counter(struct fg_chip *chip);
-static int fg_of_battery_profile_init(struct fg_chip* chip);
 
 #define BATT_MISSING_STS BIT(6)
 static irqreturn_t fg_batt_missing_irq_handler(int irq, void *_chip)
@@ -4295,16 +4301,15 @@ static int fg_hw_init(struct fg_chip *chip)
 	}
 }
 
-#define PROFILE_LOAD_BIT	BIT(0)
-#define BOOTLOADER_LOAD_BIT	BIT(1)
-#define BOOTLOADER_RESTART_BIT	BIT(2)
-#define HLOS_RESTART_BIT	BIT(3)
+#define PROFILE_LOAD_BIT		BIT(0)
+#define BOOTLOADER_LOAD_BIT		BIT(1)
+#define BOOTLOADER_RESTART_BIT		BIT(2)
+#define HLOS_RESTART_BIT		BIT(3)
 #define FG_PROFILE_LEN_PMI8950		128
 #define FG_PROFILE_LEN_PMI8998		224
 #define PROFILE_INTEGRITY_BIT		BIT(0)
 #define PMI8950_BATT_PROFILE_REG	0x4c0
 #define PMI8998_BATT_PROFILE_REG	24
-#define PMI8950_PROFILE_INTEGRITY_REG	0x53c
 static bool is_profile_load_required(struct fg_chip *chip)
 {
 	u8 buf[FG_PROFILE_LEN_PMI8998];
@@ -4312,17 +4317,7 @@ static bool is_profile_load_required(struct fg_chip *chip)
 	bool profiles_same = false;
 	int rc;
 
-	switch (chip->pmic_version) {
-	case PMI8950:
-		rc = fg_sram_read(chip, (u8 *)&val, PMI8950_PROFILE_INTEGRITY_REG,
-				1, 0, false);
-		break;
-	case PMI8998_V1:
-	case PMI8998_V2:
-		rc = fg_sram_read(chip, (u8 *)&val, PMI8998_PROFILE_INTEGRITY_REG,
-				1, 3, false);
-		break;
-	}
+	rc = fg_get_param(chip, FG_PROFILE_INTEGRITY, &val);
 	if (rc < 0) {
 		pr_err("failed to read profile integrity rc=%d\n", rc);
 		return false;
@@ -4359,14 +4354,276 @@ static bool is_profile_load_required(struct fg_chip *chip)
 			return false;
 		}
 		profiles_same = memcmp(chip->batt_info.batt_profile, buf,
-					chip->batt_info.batt_profile_len) == 0;
+					32) == 0;
 		if (profiles_same)
 			return false;
 	}
 	return true;
 }
 
+#define LOW_LATENCY			BIT(6)
 #define BATT_PROFILE_OFFSET		0x4C0
+#define PROFILE_INTEGRITY_BIT		BIT(0)
+#define FIRST_EST_DONE_BIT		BIT(5)
+#define MAX_TRIES_FIRST_EST		3
+#define FIRST_EST_WAIT_MS		2000
+#define PROFILE_LOAD_TIMEOUT_MS		5000
+static int fg_do_restart_pmi8950(struct fg_chip *chip, bool write_profile)
+{
+	int rc, ibat_ua;
+	int reg = 0;
+	bool tried_once = false;
+
+	rc = fg_get_capacity(chip, &chip->last_cap);
+	/*ignoring error*/
+
+	chip->fg_restarting = true;
+try_again:
+	if (write_profile) {
+		rc = fg_get_param(chip, FG_DATA_CURRENT, &ibat_ua);
+		if (rc) {
+			pr_err("failed to get current!\n");
+			return rc;
+		}
+
+		if (ibat_ua < 0) {
+			pr_warn("Charging enabled?, ibat_ua: %d\n", ibat_ua);
+
+			if (!tried_once) {
+				msleep(1000);
+				tried_once = true;
+				goto try_again;
+			}
+		}
+	}
+
+	/*
+	 * release the sram access and configure the correct settings
+	 * before re-requesting access.
+	 */
+	mutex_lock(&chip->sram_rw_lock);
+	fg_release_access(chip);
+
+	rc = regmap_update_bits(chip->regmap, SOC_BOOT_MODE_REG(chip),
+			NO_OTP_PROF_RELOAD, 0);
+	if (rc) {
+		pr_err("failed to set no otp reload bit\n");
+		goto unlock_and_fail;
+	}
+
+	/* unset the restart bits so the fg doesn't continuously restart */
+	reg = REDO_FIRST_ESTIMATE | RESTART_GO;
+	rc = regmap_update_bits(chip->regmap, SOC_RESTART_REG(chip),
+			reg, 0);
+	if (rc) {
+		pr_err("failed to unset fg restart: %d\n", rc);
+		goto unlock_and_fail;
+	}
+
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_CFG(chip),
+			LOW_LATENCY, LOW_LATENCY);
+	if (rc) {
+		pr_err("failed to set low latency access bit\n");
+		goto unlock_and_fail;
+	}
+	mutex_unlock(&chip->sram_rw_lock);
+
+	/* read once to get a fg cycle in */
+	rc = fg_get_param(chip, FG_PROFILE_INTEGRITY, &rc);
+	if (rc) {
+		pr_err("failed to read profile integrity rc=%d\n", rc);
+		goto fail;
+	}
+
+	/*
+	 * If this is not the first time a profile has been loaded, sleep for
+	 * 3 seconds to make sure the NO_OTP_RELOAD is cleared in memory
+	 */
+	if (chip->first_profile_loaded)
+		msleep(3000);
+
+	mutex_lock(&chip->sram_rw_lock);
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_CFG(chip), LOW_LATENCY,
+			0);
+	if (rc) {
+		pr_err("failed to set low latency access bit\n");
+		goto unlock_and_fail;
+	}
+	mutex_unlock(&chip->sram_rw_lock);
+
+	if (write_profile) {
+		/* write the battery profile */
+		rc = fg_sram_write(chip, chip->batt_info.batt_profile,
+				BATT_PROFILE_OFFSET,
+				chip->batt_info.batt_profile_len, 0, true);
+		if (rc) {
+			pr_err("failed to write profile rc=%d\n", rc);
+			goto fail;
+		}
+		/* write the integrity bits and release access */
+		rc = fg_sram_masked_write(chip,
+				chip->param[FG_PROFILE_INTEGRITY].address,
+				PROFILE_INTEGRITY_BIT,
+				PROFILE_INTEGRITY_BIT, 0);
+		if (rc) {
+			pr_err("failed to write profile rc=%d\n", rc);
+			goto fail;
+		}
+	}
+
+	/*
+	 * make sure that the first estimate has completed
+	 * in case of a hotswap
+	 */
+	rc = wait_for_completion_interruptible_timeout(&chip->first_soc_done,
+			msecs_to_jiffies(PROFILE_LOAD_TIMEOUT_MS));
+	if (rc <= 0) {
+		pr_err("transaction timed out rc=%d\n", rc);
+		rc = -ETIMEDOUT;
+		goto fail;
+	}
+
+	/*
+	 * reinitialize the completion so that the driver knows when the restart
+	 * finishes
+	 */
+	reinit_completion(&chip->first_soc_done);
+
+	/*
+	 * set the restart bits so that the next fg cycle will not reload
+	 * the profile
+	 */
+	rc = regmap_update_bits(chip->regmap, SOC_BOOT_MODE_REG(chip),
+			NO_OTP_PROF_RELOAD, NO_OTP_PROF_RELOAD);
+	if (rc) {
+		pr_err("failed to set no otp reload bit\n");
+		goto fail;
+	}
+
+	reg = REDO_FIRST_ESTIMATE | RESTART_GO;
+	rc = regmap_update_bits(chip->regmap, SOC_RESTART_REG(chip),
+			reg, reg);
+	if (rc) {
+		pr_err("failed to set fg restart: %d\n", rc);
+		goto fail;
+	}
+
+	/* wait for the first estimate to complete */
+	rc = wait_for_completion_interruptible_timeout(&chip->first_soc_done,
+			msecs_to_jiffies(PROFILE_LOAD_TIMEOUT_MS));
+	if (rc <= 0) {
+		pr_err("transaction timed out rc=%d\n", rc);
+		rc = -ETIMEDOUT;
+		goto fail;
+	}
+
+	rc = regmap_read(chip->regmap, INT_RT_STS(chip->soc_base), &reg);
+	if (rc) {
+		pr_err("spmi read failed: addr=%03X, rc=%d\n",
+				INT_RT_STS(chip->soc_base), rc);
+		goto fail;
+	}
+	if ((reg & FIRST_EST_DONE_BIT) == 0)
+		pr_err("Battery profile reloading failed, no first estimate\n");
+
+	rc = regmap_update_bits(chip->regmap, SOC_BOOT_MODE_REG(chip),
+			NO_OTP_PROF_RELOAD, 0);
+	if (rc) {
+		pr_err("failed to set no otp reload bit\n");
+		goto fail;
+	}
+	/* unset the restart bits so the fg doesn't continuously restart */
+	rc = regmap_update_bits(chip->regmap, SOC_RESTART_REG(chip),
+			REDO_FIRST_ESTIMATE | RESTART_GO, 0);
+	if (rc) {
+		pr_err("failed to unset fg restart: %d\n", rc);
+		goto fail;
+	}
+
+	chip->fg_restarting = false;
+
+	return 0;
+
+unlock_and_fail:
+	mutex_unlock(&chip->sram_rw_lock);
+fail:
+	chip->fg_restarting = false;
+	return -EINVAL;
+}
+
+#define PROFILE_REG_PMI8998	24
+#define PROFILE_OFFSET_PMI8998	0
+#define SOC_READY_WAIT_MS	2000
+static int fg_do_restart_pmi8998(struct fg_chip *chip, bool write_profile)
+{
+	int rc, msoc;
+	u8 val;
+	bool tried_again = false;
+
+	rc = regmap_update_bits(chip->regmap, BATT_SOC_RESTART(chip),
+			RESTART_GO, 0);
+	if (rc) {
+		dev_err(chip->dev, "failed to set restart bit: %d\n", rc);
+		return -EINVAL;
+	}
+
+	/* load battery profile */
+	rc = fg_sram_write(chip, chip->batt_info.batt_profile,
+			PROFILE_REG_PMI8998, FG_PROFILE_LEN_PMI8998,
+			PROFILE_OFFSET_PMI8998, false);
+	if (rc) {
+		pr_err("Error in writing battery profile, rc:%d\n", rc);
+		goto out;
+	}
+
+	/* Set the profile integrity bit */
+	val = HLOS_RESTART_BIT | PROFILE_LOAD_BIT;
+	fg_set_param(chip, FG_PROFILE_INTEGRITY, &val);
+	if (rc) {
+		pr_err("failed to write profile integrity rc=%d\n", rc);
+		goto out;
+	}
+
+	rc = fg_get_capacity(chip, &msoc);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to get capacity: %d\n", rc);
+		return rc;
+	}
+
+	chip->last_cap = msoc;
+	chip->fg_restarting = true;
+	reinit_completion(&chip->first_soc_done);
+	rc = regmap_update_bits(chip->regmap, BATT_SOC_RESTART(chip), RESTART_GO,
+			RESTART_GO);
+	if (rc < 0) {
+		pr_err("Error in writing to %04x, rc=%d\n",
+			BATT_SOC_RESTART(chip), rc);
+		goto out;
+	}
+
+wait:
+	rc = wait_for_completion_interruptible_timeout(&chip->first_soc_done,
+		msecs_to_jiffies(SOC_READY_WAIT_MS));
+
+	/* If we were interrupted wait again one more time. */
+	if (rc == -ERESTARTSYS && !tried_again) {
+		tried_again = true;
+		goto wait;
+	} else if (rc <= 0) {
+		pr_err("wait for soc_ready timed out rc=%d\n", rc);
+	}
+
+	rc = regmap_update_bits(chip->regmap, BATT_SOC_RESTART(chip),
+			RESTART_GO, 0);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to deassert restart: %d\n", rc);
+		goto out;
+	}
+out:
+	chip->fg_restarting = false;
+	return rc;
+}
+
 #define PROFILE_COMPARE_LEN		32
 #define ESR_MAX				300000
 #define ESR_MIN				5000
@@ -4379,7 +4636,7 @@ static int fg_of_battery_profile_init(struct fg_chip *chip)
 
 	batt_node = of_find_node_by_name(node, "qcom,battery-data");
 	if (!batt_node) {
-		pr_err("No available batterydata\n");
+		dev_err(chip->dev, "No available batterydata\n");
 		return rc;
 	}
 
@@ -4424,6 +4681,13 @@ static int fg_of_battery_profile_init(struct fg_chip *chip)
 		return -EINVAL;
 	}
 
+	rc = of_property_read_u32(batt_node, "qcom,fastchg-current-ma",
+			&chip->batt_info.fastchg_curr_ma);
+	if (rc < 0) {
+		dev_err(chip->dev, "battery fastchg current unavailable");
+		chip->batt_info.fastchg_curr_ma = -EINVAL;
+	}
+
 	rc = of_property_read_u32(batt_node, "qcom,max-voltage-uv",
 					&chip->batt_info.batt_max_voltage_uv);
 
@@ -4435,18 +4699,20 @@ static int fg_of_battery_profile_init(struct fg_chip *chip)
 	if (data && ((len == 6 && chip->pmic_version == PMI8950) ||
 			(len == 3 && chip->pmic_version != PMI8950))) {
 		memcpy(chip->batt_info.thermal_coeffs, data, len);
+		chip->batt_info.thermal_coeffs_len = len;
 	}
 
 	data = of_get_property(batt_node, "qcom,fg-profile-data", &len);
 	if (!data) {
-		pr_err("no battery profile loaded\n");
-		return 0;
+		dev_err(chip->dev, "no battery profile loaded\n");
+		return -EINVAL;
 	}
 
 	if ((chip->pmic_version == PMI8950 && len != FG_PROFILE_LEN_PMI8950) ||
-		(chip->pmic_version == PMI8998_V1 && len != FG_PROFILE_LEN_PMI8998) ||
-		(chip->pmic_version == PMI8998_V2 && len != FG_PROFILE_LEN_PMI8998)) {
-		pr_err("battery profile incorrect size: %d\n", len);
+		((chip->pmic_version == PMI8998_V1 ||
+		chip->pmic_version == PMI8998_V2) &&
+		len != FG_PROFILE_LEN_PMI8998)) {
+		dev_err(chip->dev, "battery profile incorrect size: %d\n", len);
 		return -EINVAL;
 	}
 
@@ -4454,25 +4720,58 @@ static int fg_of_battery_profile_init(struct fg_chip *chip)
 			sizeof(char) * len, GFP_KERNEL);
 
 	if (!chip->batt_info.batt_profile) {
-		pr_err("coulnt't allocate mem for battery profile\n");
+		dev_err(chip->dev, "coulnt't allocate mem for battery profile\n");
 		rc = -ENOMEM;
 		return rc;
 	}
 
-	if (!is_profile_load_required(chip))
-		goto done;
-	else
-		pr_warn("profile load needs to be done, but not done!\n");
+	return rc;
+}
 
-done:
-	rc = fg_get_param(chip, FG_DATA_NOM_CAP, &chip->batt_info.nom_cap_uah);
-	if (rc) {
-		pr_err("Failed to read nominal capacitance: %d\n", rc);
-		return -EINVAL;
+#define SW_CONFIG_OFFSET		0
+static void fg_update_batt_profile(struct fg_chip *chip)
+{
+	int rc, offset, temp;
+	u8 val;
+	const struct fg_sram_param rslow_chg = chip->param[FG_SETTING_RSLOW_CHG],
+		rslow_dischg = chip->param[FG_SETTING_RSLOW_DISCHG];
+
+	rc = fg_sram_read(chip, &val, chip->param[FG_PROFILE_INTEGRITY].address,
+			1, SW_CONFIG_OFFSET, false);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to get  SW_CONFIG: %d\n", rc);
+		return;
 	}
 
-	//estimate_battery_age(fg, &fg->actual_cap_uah);
-	return rc;
+	/*
+	 * If the RCONN had not been updated, no need to update battery
+	 * profile. Else, update the battery profile so that the profile
+	 * modified by bootloader or HLOS matches with the profile read
+	 * from device tree.
+	 */
+
+	if (!(val & RCONN_CONFIG_BIT))
+		return;
+
+	rc = fg_get_param(chip, FG_SETTING_RSLOW_CHG, &temp);
+	val = temp;
+	if (rc) {
+		pr_err("Error in reading ESR_RSLOW_CHG_OFFSET, rc=%d\n", rc);
+		return;
+	}
+	offset = (rslow_chg.address - PROFILE_REG_PMI8998) * 4
+			+ rslow_chg.offset;
+	chip->batt_info.batt_profile[offset] = val;
+
+	rc = fg_get_param(chip, FG_SETTING_RSLOW_DISCHG, &temp);
+	val = temp;
+	if (rc) {
+		dev_err(chip->dev, "failed to get ESR_RSLOW_DISCHG: %d\n", rc);
+		return;
+	}
+	offset = (rslow_dischg.address - PROFILE_REG_PMI8998) * 4
+			+ rslow_dischg.offset;
+	chip->batt_info.batt_profile[offset] = val;
 }
 
 static int fg_parse_ki_coefficients(struct fg_chip *chip)
@@ -4982,6 +5281,8 @@ static void fg_cap_learning_update(struct fg_chip *chip)
 	bool input_present = is_input_present(chip);
 	bool prime_cc = false;
 
+	mutex_lock(&chip->cl.lock);
+
 	if (!fg_is_temperature_ok_for_learning(chip) ||
 			!chip->cl.learned_cc_uah) {
 		chip->cl.active = false;
@@ -5067,6 +5368,61 @@ static void fg_cap_learning_update(struct fg_chip *chip)
 
 out:
 	mutex_unlock(&chip->cl.lock);
+}
+
+static void fg_battery_profile_load_work(struct work_struct *work)
+{
+	struct fg_chip *chip = container_of(work,
+			struct fg_chip,
+			profile_load_work.work);
+	int rc;
+
+	/*TODO disable charging when this starts*/
+	rc = fg_of_battery_profile_init(chip);
+	if (rc) {
+		dev_err(chip->dev, "failed to get profile from dt: %d\n", rc);
+		goto out;
+	}
+
+	if (chip->pmic_version != PMI8950)
+		fg_update_batt_profile(chip);
+
+	if (!is_profile_load_required(chip))
+		goto done;
+
+	dev_warn(chip->dev, "profile load requested!\n");
+	clear_cycle_counter(chip);
+	mutex_lock(&chip->cl.lock);
+	chip->cl.learned_cc_uah = 0;
+	chip->cl.active = false;
+	mutex_unlock(&chip->cl.lock);
+
+	chip->do_restart(chip, true);
+
+done:
+	rc = fg_get_param(chip, FG_DATA_NOM_CAP, &chip->cl.nom_cap_uah);
+	if (rc) {
+		dev_err(chip->dev, "failed to get nom_cap: %d\n", rc);
+	} else {
+		rc = fg_load_learned_cap_from_sram(chip);
+		if (rc)
+			dev_err(chip->dev, "failed to load capacity: %d\n", rc);
+	}
+
+	rc = chip->rconn_config(chip);
+	if (rc < 0)
+		pr_err("Error in configuring Rconn, rc=%d\n", rc);
+
+	batt_psy_initialized(chip);
+	fg_notify_charger(chip);
+
+out:
+	chip->first_profile_loaded = true;
+	chip->soc_reporting_ready = true;
+	if (!work_pending(&chip->status_change_work)) {
+		//fg_stay_awake(chip, FG_STATUS_NOTIFY_WAKE);
+		schedule_work(&chip->status_change_work);
+	}
 }
 
 static int __fg_esr_filter_config(struct fg_chip *chip,
@@ -5574,6 +5930,8 @@ static int fg_probe(struct platform_device *pdev)
 	init_completion(&chip->first_soc_done);
 	init_completion(&chip->sram_access_granted);
 	init_completion(&chip->sram_access_revoked);
+	INIT_DELAYED_WORK(&chip->profile_load_work,
+			fg_battery_profile_load_work);
 
 	chip->regmap = dev_get_regmap(pdev->dev.parent, NULL);
 	if (!chip->regmap) {
@@ -5624,15 +5982,6 @@ static int fg_probe(struct platform_device *pdev)
 		return rc;
 	}
 
-	rc = fg_of_battery_profile_init(chip);
-	if (rc)
-		pr_err("profile init failed: %d\n", rc);
-
-	if (rc) {
-		dev_err(chip->dev, "failed to init hw: %d\n", rc);
-		return rc;
-	}
-
 	bms_cfg.drv_data = chip;
 	bms_cfg.of_node = pdev->dev.of_node;
 
@@ -5645,6 +5994,8 @@ static int fg_probe(struct platform_device *pdev)
 	chip->power_supply_registered = true;
 
 	platform_set_drvdata(pdev, chip);
+
+	schedule_delayed_work(&chip->profile_load_work, 0);
 
 	return 0;
 }
@@ -5660,7 +6011,7 @@ static const struct fg_pmic_data pmi8950_fg = {
 	.irqs			= fg_irqs_pmi8950,
 	.init_irqs		= fg_init_irqs_pmi8950,
 	.status_change_work	= status_change_work_pmi8950,
-	/*.do_restart		= fg_do_restart_pmi8950,*/
+	.do_restart		= fg_do_restart_pmi8950,
 	.rconn_config		= fg_rconn_config_pmi8950,
 }, pmi8998v1_fg = {
 	.pmic_version		= PMI8998_V1,
@@ -5668,7 +6019,7 @@ static const struct fg_pmic_data pmi8950_fg = {
 	.irqs			= fg_irqs_pmi8998,
 	.init_irqs		= fg_init_irqs_pmi8998,
 	.status_change_work	= status_change_work_pmi8998,
-	/*.do_restart		= fg_do_restart_pmi8998,*/
+	.do_restart		= fg_do_restart_pmi8998,
 	.rconn_config		= fg_rconn_config_pmi8998,
 }, pmi8998v2_fg = {
 	.pmic_version		= PMI8998_V2,
@@ -5676,7 +6027,7 @@ static const struct fg_pmic_data pmi8950_fg = {
 	.irqs			= fg_irqs_pmi8998,
 	.init_irqs		= fg_init_irqs_pmi8998,
 	.status_change_work	= status_change_work_pmi8998,
-	/*.do_restart		= fg_do_restart_pmi8998,*/
+	.do_restart		= fg_do_restart_pmi8998,
 	.rconn_config		= fg_rconn_config_pmi8998,
 };
 
