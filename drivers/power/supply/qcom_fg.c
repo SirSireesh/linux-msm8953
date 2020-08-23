@@ -110,7 +110,6 @@ enum fg_sram_param_id {
 	FG_DATA_BATT_ESR_REG,
 	FG_DATA_FULL_SOC,
 	FG_DATA_CYCLE_COUNT,
-	FG_DATA_VINT_ERR,
 	FG_DATA_CPRED_VOLTAGE,
 	FG_DATA_CHARGE_COUNTER,
 	FG_DATA_ACT_CAP,
@@ -271,14 +270,6 @@ static struct fg_sram_param fg_params_pmi8950[FG_PARAM_MAX] = {
 			fg_encode_float, fg_decode_float),
 	FG_SRAM_PARAM_DEF(SETTING_RSLOW_DISCHG, 0x514, 0, 2, 0, 0, 0,
 			fg_encode_float, fg_decode_float),
-	//TODO: change to setting?
-	[FG_DATA_VINT_ERR] = {
-		.address	= 0x560,
-		.offset		= 0,
-		.length		= 4,
-		.decode		= fg_decode_value_16b,
-		.encode		= fg_encode_default
-	},
 	[FG_SETTING_THERMAL_COEFFS] = {
 		.address	= 0x444,
 		.offset		= 2,
@@ -1071,6 +1062,8 @@ struct fg_chip {
 	bool ima_supported;
 	bool reset_on_lockup;
 
+	spinlock_t awake_lock;
+
 	/* base addresses of components*/
 	unsigned int soc_base;
 	unsigned int batt_base;
@@ -1092,6 +1085,7 @@ struct fg_chip {
 	int health;
 	int status;
 	int prev_status;
+	int awake_status;
 	int charge_status;
 	int prev_charge_status;
 	enum temperature temp_status;
@@ -1103,6 +1097,7 @@ struct fg_chip {
 	int esr_flt_sts;
 
 	struct work_struct status_change_work;
+	struct work_struct esr_filter_work;
 	struct delayed_work profile_load_work;
 
 	bool irqs_enabled;
@@ -1974,6 +1969,39 @@ static void fg_encode_adc(struct fg_sram_param sp, int val, u8 *buf)
 	buf[1] = val >> 8;
 }
 
+enum awake_reason {
+	FG_SW_ESR_WAKE = BIT(0),
+	FG_STATUS_NOTIFY_WAKE = BIT(1),
+	FG_RESET_WAKE = BIT(2),
+	FG_GAIN_COMP_WAKE = BIT(3),
+	FG_SRAM_ACCESS_REQ_WAKE = BIT(4),
+	FG_SRAM_ACCESS_WAKE = BIT(5),
+};
+
+void fg_stay_awake(struct fg_chip *chip, enum awake_reason reason)
+{
+	spin_lock(&chip->awake_lock);
+
+	if (!chip->awake_status)
+		pm_stay_awake(chip->dev);
+
+	chip->awake_status |= reason;
+
+	spin_unlock(&chip->awake_lock);
+}
+
+void fg_relax(struct fg_chip *chip, int awake_reason)
+{
+	spin_lock(&chip->awake_lock);
+
+	chip->awake_status &= ~awake_reason;
+
+	if (!chip->awake_status)
+		pm_relax(chip->dev);
+
+	spin_unlock(&chip->awake_lock);
+}
+
 static int fg_write(struct fg_chip *chip, u8 *val, u16 addr, int len)
 {
 	int rc;
@@ -2139,9 +2167,6 @@ static int fg_reset(struct fg_chip *chip, bool reset)
 		0xff, reset ? RESET_MASK : 0);
 }
 
-static int fg_set_param(struct fg_chip *chip, enum fg_sram_param_id id,
-		u8 *val);
-
 static void fg_enable_irqs(struct fg_chip *chip, bool enable)
 {
 	/*
@@ -2189,6 +2214,8 @@ static void fg_enable_irqs(struct fg_chip *chip, bool enable)
 }
 
 static int fg_hw_init(struct fg_chip *chip);
+static int fg_sram_write(struct fg_chip *chip, u8 *val, u16 address,
+		int len, int offset, bool keep_access);
 
 #define EN_WR_FGXCT_PRD		BIT(6)
 #define EN_RD_FGXCT_PRD		BIT(5)
@@ -2197,7 +2224,15 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 {
 	int rc;
 	u8 buf[4] = {0, 0, 0, 0};
+	const struct fg_sram_param vint_err = {
+		.address	= 0x560,
+		.offset		= 0,
+		.length		= 4,
+	};
+
 	fg_enable_irqs(chip, false);
+
+	fg_stay_awake(chip, FG_RESET_WAKE);
 
 	/* Acquire IMA access forcibly from FG ALG */
 	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
@@ -2236,11 +2271,13 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 	fg_hw_init(chip);
 
 out:
-	rc = fg_set_param(chip, FG_DATA_VINT_ERR, buf);
-	if (rc < 0)
-		dev_err(chip->dev, "Error in clearing VACT_INT_ERR, rc=%d\n",
-				rc);
+	rc = fg_sram_write(chip, buf, vint_err.address, vint_err.length,
+			vint_err.offset, false);
+	if (rc)
+		dev_err(chip->dev, "failed to clear VACT_INT_ERR: %d\n", rc);
+
 	fg_enable_irqs(chip, true);
+	fg_relax(chip, FG_RESET_WAKE);
 	return rc;
 }
 
@@ -2562,12 +2599,6 @@ static int fg_interleaved_sram_config(struct fg_chip *chip, u8 *val,
 	return rc;
 }
 
-static int fg_release_access(struct fg_chip *chip)
-{
-	return fg_masked_write(chip, MEM_INTF_CFG(chip),
-			RIF_MEM_ACCESS_REQ, 0);
-}
-
 #define FG_MEM_AVAIL_BIT	BIT(0)
 static inline int fg_assert_sram_access(struct fg_chip *chip)
 {
@@ -2633,6 +2664,7 @@ static int fg_req_and_wait_access(struct fg_chip *chip, int timeout)
 			pr_err("failed to set mem access bit\n");
 			return -EIO;
 		}
+		fg_stay_awake(chip, FG_SRAM_ACCESS_REQ_WAKE);
 	}
 
 	do {
@@ -2644,6 +2676,15 @@ static int fg_req_and_wait_access(struct fg_chip *chip, int timeout)
 			return -ETIMEDOUT;
 		}
 	} while (tries++ < 2);
+
+	return rc;
+}
+
+static int fg_release_access(struct fg_chip *chip)
+{
+	int rc = fg_masked_write(chip, MEM_INTF_CFG(chip),
+			RIF_MEM_ACCESS_REQ, 0);
+	fg_relax(chip, FG_SRAM_ACCESS_REQ_WAKE);
 
 	return rc;
 }
@@ -2803,6 +2844,8 @@ static int fg_interleaved_sram_write(struct fg_chip *chip, u8 *val, u16 address,
 		return -EINVAL;
 	}
 
+	fg_stay_awake(chip, FG_SRAM_ACCESS_WAKE);
+
 	address = ((orig_address + offset) / 4) * 4;
 	offset = (orig_address + offset) % 4;
 
@@ -2960,10 +3003,12 @@ static int fg_interleaved_sram_read(struct fg_chip *chip, u8 *val, u16 address,
 						0);
 		if (rc)
 			pr_err("Failed to read OTP memory %d\n", rc);
-		return rc;
+		goto exit;
 	}
 
 	mutex_lock(&chip->sram_rw_lock);
+
+	fg_stay_awake(chip, FG_SRAM_ACCESS_WAKE);
 
 retry:
 	if (count >= RETRY_COUNT_MAX) {
@@ -3031,6 +3076,8 @@ out:
 	}
 
 	mutex_unlock(&chip->sram_rw_lock);
+exit:
+	fg_relax(chip, FG_SRAM_ACCESS_WAKE);
 	return rc;
 }
 
@@ -3237,6 +3284,49 @@ static bool is_parallel_charger_available(struct fg_chip *chip)
 		return false;
 
 	return true;
+}
+
+#define FG_ESR_FILTER_RESTART_MS	60000
+static void esr_filter_work(struct work_struct *work)
+{
+	struct fg_chip *chip = container_of(work,
+			struct fg_chip, esr_filter_work);
+	int rc, batt_temp;
+
+	rc = fg_get_temperature(chip, &batt_temp);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to get batt_temp: %d\n", rc);
+		alarm_start_relative(&chip->esr_filter_alarm,
+			ms_to_ktime(FG_ESR_FILTER_RESTART_MS));
+		goto out;
+	}
+
+	rc = fg_esr_filter_config(chip, batt_temp, true);
+	if (rc < 0) {
+		pr_err("Error in configuring ESR filter rc:%d\n", rc);
+		alarm_start_relative(&chip->esr_filter_alarm,
+			ms_to_ktime(FG_ESR_FILTER_RESTART_MS));
+	}
+
+out:
+	chip->delta_temp_irq_count = 0;
+	pm_relax(chip->dev);
+}
+
+static enum alarmtimer_restart fg_esr_filter_alarm_cb(struct alarm *alarm,
+							ktime_t now)
+{
+	struct fg_chip *chip = container_of(alarm, struct fg_chip,
+					esr_filter_alarm);
+
+	/*
+	 * We cannot vote for awake votable here as that takes a mutex lock
+	 * and this is executed in an atomic context.
+	 */
+	pm_stay_awake(chip->dev);
+	schedule_work(&chip->esr_filter_work);
+
+	return ALARMTIMER_NORESTART;
 }
 
 static int fg_esr_fcc_config(struct fg_chip *chip)
@@ -4358,6 +4448,7 @@ static bool is_profile_load_required(struct fg_chip *chip)
 		if (profiles_same)
 			return false;
 	}
+	pr_err("profile integrity bit not set!\n");
 	return true;
 }
 
@@ -5420,7 +5511,7 @@ out:
 	chip->first_profile_loaded = true;
 	chip->soc_reporting_ready = true;
 	if (!work_pending(&chip->status_change_work)) {
-		//fg_stay_awake(chip, FG_STATUS_NOTIFY_WAKE);
+		fg_stay_awake(chip, FG_STATUS_NOTIFY_WAKE);
 		schedule_work(&chip->status_change_work);
 	}
 }
@@ -5556,6 +5647,47 @@ static int fg_esr_validate(struct fg_chip *chip)
 	return rc;
 }
 
+static int fg_esr_timer_config(struct fg_chip *chip, bool sleep)
+{
+	int rc, cycles_init, cycles_max;
+	bool end_of_charge = false;
+
+	end_of_charge = is_input_present(chip) && chip->charge_done;
+
+	/* ESR discharging timer configuration */
+	cycles_init = sleep ? chip->dt.esr_timer_asleep[TIMER_RETRY] :
+			chip->dt.esr_timer_awake[TIMER_RETRY];
+	if (end_of_charge)
+		cycles_init = 0;
+
+	cycles_max = sleep ? chip->dt.esr_timer_asleep[TIMER_MAX] :
+			chip->dt.esr_timer_awake[TIMER_MAX];
+
+	rc = fg_set_esr_timer(chip, cycles_init, cycles_max, false);
+	if (rc < 0) {
+		dev_err(chip->dev, "failed to set ESR timer: %d\n", rc);
+		return rc;
+	}
+
+	/* ESR charging timer configuration */
+	cycles_init = cycles_max = -EINVAL;
+	if (end_of_charge || sleep) {
+		cycles_init = chip->dt.esr_timer_charging[TIMER_RETRY];
+		cycles_max = chip->dt.esr_timer_charging[TIMER_MAX];
+	} else if (is_input_present(chip)) {
+		cycles_init = chip->esr_timer_charging_default[TIMER_RETRY];
+		cycles_max = chip->esr_timer_charging_default[TIMER_MAX];
+	}
+
+	rc = fg_set_esr_timer(chip, cycles_init, cycles_max, true);
+	if (rc < 0) {
+		pr_err("Error in setting ESR timer, rc=%d\n", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
 #define MAX_BATTERY_CC_SOC_CAPACITY		150
 static void status_change_work_pmi8950(struct work_struct *work)
 {
@@ -5568,7 +5700,7 @@ static void status_change_work_pmi8950(struct work_struct *work)
 	bool otg_present = is_otg_present(chip);
 
 	if (batt_missing)
-		return;
+		goto out;
 
 	rc = fg_get_capacity(chip, &capacity);
 
@@ -5620,9 +5752,9 @@ static void status_change_work_pmi8950(struct work_struct *work)
 					batt_soc_p.address, batt_soc_p.length,
 					batt_soc_p.offset, false);
 			if (rc)
-				return;
+				goto out;
 			if (!batt_soc)
-				return;
+				goto out;
 
 			batt_soc = div64_s64((int64_t)batt_soc *
 					FULL_PERCENT_28BIT, FULL_PERCENT_3B);
@@ -5638,11 +5770,14 @@ static void status_change_work_pmi8950(struct work_struct *work)
 
 	if (chip->input_present ^ input_present ||
 		chip->otg_present ^ otg_present) {
-		//TODO:fg_stay_awake(chip, FG_GAIN_COMP_WAKE);
+		fg_stay_awake(chip, FG_GAIN_COMP_WAKE);
 		chip->input_present = input_present;
 		chip->otg_present = otg_present;
 		fg_iadc_gain_comp(chip);
 	}
+
+out:
+	fg_relax(chip, FG_STATUS_NOTIFY_WAKE);
 }
 
 static void status_change_work_pmi8998(struct work_struct *work)
@@ -5701,8 +5836,7 @@ static void status_change_work_pmi8998(struct work_struct *work)
 
 	chip->prev_charge_status = chip->charge_status;
 out:
-	return;
-	//TODO:fg_relax(chip, FG_STATUS_NOTIFY_WAKE);
+	fg_relax(chip, FG_STATUS_NOTIFY_WAKE);
 }
 
 #define IACS_INTR_SRC_SLCT	BIT(3)
@@ -5927,9 +6061,11 @@ static int fg_probe(struct platform_device *pdev)
 	mutex_init(&chip->cl.lock);
 	mutex_init(&chip->rslow_comp.lock);
 	mutex_init(&chip->cyc_ctr.lock);
+	spin_lock_init(&chip->awake_lock);
 	init_completion(&chip->first_soc_done);
 	init_completion(&chip->sram_access_granted);
 	init_completion(&chip->sram_access_revoked);
+	INIT_WORK(&chip->esr_filter_work, esr_filter_work);
 	INIT_DELAYED_WORK(&chip->profile_load_work,
 			fg_battery_profile_load_work);
 
@@ -5955,6 +6091,10 @@ static int fg_probe(struct platform_device *pdev)
 	chip->do_restart = match_data->do_restart;
 	chip->rconn_config = match_data->rconn_config;
 	INIT_WORK(&chip->status_change_work, match_data->status_change_work);
+
+	if (chip->pmic_version != PMI8950)
+		alarm_init(&chip->esr_filter_alarm, ALARM_BOOTTIME,
+				fg_esr_filter_alarm_cb);
 
 	chip->status = POWER_SUPPLY_STATUS_DISCHARGING;
 
@@ -6000,10 +6140,151 @@ static int fg_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static void fg_cancel_all_works(struct fg_chip *chip)
+{
+	cancel_work_sync(&chip->status_change_work);
+	cancel_work_sync(&chip->esr_filter_work);
+	cancel_delayed_work_sync(&chip->profile_load_work);
+}
+
 static int fg_remove(struct platform_device *pdev)
 {
+	int i;
+	struct fg_chip *chip = dev_get_drvdata(&pdev->dev);
+
+	fg_cancel_all_works(chip);
+	power_supply_unregister(chip->bms_psy);
+	mutex_destroy(&chip->sram_rw_lock);
+	mutex_destroy(&chip->cl.lock);
+	mutex_destroy(&chip->rslow_comp.lock);
+	mutex_destroy(&chip->cyc_ctr.lock);
+
+	power_supply_put(chip->batt_psy);
+	power_supply_put(chip->usb_psy);
+	power_supply_put(chip->dc_psy);
+	chip->batt_psy = NULL;
+	chip->usb_psy = NULL;
+	chip->dc_psy = NULL;
+	dev_set_drvdata(chip->dev, NULL);
+
+	switch (chip->pmic_version) {
+	case PMI8950:
+		for (i = 0; i < FG_IRQS_MAX_PMI8950; ++i)
+			if (chip->irqs[i].irq)
+				devm_free_irq(chip->dev, chip->irqs[i].irq,
+						chip);
+		break;
+	case PMI8998_V1:
+	case PMI8998_V2:
+		for (i = 0; i < FG_IRQS_MAX_PMI8998; ++i)
+			if (chip->irqs[i].irq)
+				devm_free_irq(chip->dev, chip->irqs[i].irq,
+						chip);
+		break;
+	}
+
+	alarm_try_to_cancel(&chip->esr_filter_alarm);
+
+	dev_set_drvdata(chip->dev, NULL);
+
 	return 0;
 }
+
+
+static void fg_check_ima_idle(struct fg_chip *chip)
+{
+	bool rif_mem_sts = true;
+	int rc, time_count = 0;
+
+	mutex_lock(&chip->sram_rw_lock);
+	/* Make sure IMA is idle */
+	do {
+		rc = fg_check_rif_mem_access(chip, &rif_mem_sts);
+		/* Wait for 4ms before reading RIF_MEM_ACCESS_REQ again */
+		usleep_range(4000, 4100);
+		time_count++;
+	} while (time_count++ <= 4 && rif_mem_sts && !rc);
+
+	if  (time_count > 4) {
+		pr_err("Waited for ~16ms polling RIF_MEM_ACCESS_REQ\n");
+		fg_run_iacs_clear_sequence(chip);
+	}
+
+	mutex_unlock(&chip->sram_rw_lock);
+}
+
+static void fg_shutdown(struct platform_device *pdev)
+{
+	struct fg_chip *chip = dev_get_drvdata(&pdev->dev);
+	int rc, bsoc;
+
+	if (chip->pmic_version == PMI8950) {
+		fg_cancel_all_works(chip);
+		fg_check_ima_idle(chip);
+		return;
+	}
+
+	if (chip->charge_full) {
+		rc = fg_get_param(chip, FG_DATA_BATT_SOC, &bsoc);
+		if (rc < 0) {
+			pr_err("Error in getting BATT_SOC, rc=%d\n", rc);
+			return;
+		}
+
+		/* We need 2 most significant bytes here */
+		bsoc = (u32)bsoc >> 16;
+
+		rc = fg_configure_full_soc(chip, bsoc);
+		if (rc < 0) {
+			pr_err("Error in configuring full_soc, rc=%d\n", rc);
+			return;
+		}
+	}
+	rc = fg_set_esr_timer(chip, chip->dt.esr_timer_shutdown[TIMER_RETRY],
+				chip->dt.esr_timer_shutdown[TIMER_MAX], false);
+	if (rc < 0)
+		pr_err("Error in setting ESR timer at shutdown, rc=%d\n", rc);
+}
+
+static int fg_suspend(struct device *dev)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+	int rc;
+
+	if (chip->pmic_version == PMI8950)
+		return 0;
+
+	rc = fg_esr_timer_config(chip, true);
+	if (rc)
+		dev_err(chip->dev, "failed to config ESR timer: %d\n", rc);
+
+	return 0;
+}
+
+static int fg_resume(struct device *dev)
+{
+	struct fg_chip *chip = dev_get_drvdata(dev);
+	int rc;
+
+	if (chip->pmic_version == PMI8950)
+		return 0;
+
+	rc = fg_esr_timer_config(chip, false);
+	if (rc)
+		dev_err(chip->dev, "failed to config ESR timer: %d\n", rc);
+
+	if (!work_pending(&chip->status_change_work)) {
+		pm_stay_awake(chip->dev);
+		schedule_work(&chip->status_change_work);
+	}
+
+	return 0;
+}
+
+static const struct dev_pm_ops qcom_fg_pm_ops = {
+	.suspend	= fg_suspend,
+	.resume		= fg_resume,
+};
 
 static const struct fg_pmic_data pmi8950_fg = {
 	.pmic_version		= PMI8950,
@@ -6043,9 +6324,11 @@ MODULE_DEVICE_TABLE(of, fg_match_id_table);
 static struct platform_driver qcom_fg_driver = {
 	.probe = fg_probe,
 	.remove = fg_remove,
+	.shutdown = fg_shutdown,
 	.driver = {
 		.name = "qcom-fg",
 		.of_match_table = fg_match_id_table,
+		.pm = &qcom_fg_pm_ops,
 	},
 };
 
