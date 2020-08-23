@@ -212,7 +212,7 @@ static int bs052fhm_a00_6c01_get_brightness(struct backlight_device *bl)
 
 	bl->props.brightness = brightness;
 
-	return brightness & 0xff;
+	return brightness;
 }
 
 static int bs052fhm_a00_6c01_set_brightness(struct backlight_device *bl)
@@ -312,7 +312,7 @@ static int bs052fhm_a00_6c01_probe(struct mipi_dsi_device *dsi)
 	memset(&bl_props, 0, sizeof(bl_props));
 	bl_props.type = BACKLIGHT_RAW;
 	bl_props.brightness = 0x0fff;
-	bl_props.max_brightness = 0xffff;
+	bl_props.max_brightness = 0x0fff;
 
 	ctx->backlight = devm_backlight_device_register(dev, "bs052fhm-a00-6c01",
 						dev, dsi, &bs052fhm_a00_6c01_ops,
