@@ -55,7 +55,7 @@
 #define MEM_INTF_WR_DATA0(chip)			(chip->mem_base + 0x63)
 #define MEM_INTF_RD_DATA0(chip)			(chip->mem_base + 0x67)
 #define MEM_INTF_DMA_STS(chip)			(chip->mem_base + 0x70)
-#define MEM_INTF_DMA_LOG(chip)			(chip->mem_base + 0x71)
+#define MEM_INTF_DMA_CTL(chip)			(chip->mem_base + 0x71)
 
 /* Gen3 FG specific: */
 #define BATT_SOC_RESTART(chip)			(chip->batt_base + 0x48)
@@ -1053,7 +1053,6 @@ struct fg_chip {
 
 	u8 revision[4];
 	enum pmic pmic_version;
-	bool ima_supported;
 	bool reset_on_lockup;
 
 	spinlock_t awake_lock;
@@ -2000,89 +1999,39 @@ void fg_relax(struct fg_chip *chip, int awake_reason)
 	spin_unlock(&chip->awake_lock);
 }
 
-static int fg_write(struct fg_chip *chip, u8 *val, u16 addr, int len)
-{
-	int rc;
-	bool sec_access = (addr & 0xff) > 0xd0;
-	u8 sec_addr_val = 0xa5;
-
-	if (sec_access) {
-		pr_info("sec_access addr = %d\n", addr);
-		rc = regmap_bulk_write(chip->regmap,
-				(addr & 0xff00) | 0xd0,
-				&sec_addr_val, 1);
-	}
-
-	if ((addr & 0xff00) == 0) {
-		dev_err(chip->dev, "addr cannot be zero base=0x%02x\n", addr);
-		return -EINVAL;
-	}
-
-	return regmap_bulk_write(chip->regmap, addr, val, len);
-}
-
-static int fg_read(struct fg_chip *chip, u8 *val, u16 addr, int len)
-{
-	if ((addr & 0xff00) == 0) {
-		dev_err(chip->dev, "base cannot be zero base=0x%02x\n", addr);
-		return -EINVAL;
-	}
-
-	return regmap_bulk_read(chip->regmap, addr, val, len);
-}
-
-static int fg_masked_write(struct fg_chip *chip, u16 addr,
-		u8 mask, u8 val)
-{
-	int error;
-	u8 reg;
-	error = fg_read(chip, &reg, addr, 1);
-	if (error)
-		return error;
-
-	reg &= ~mask;
-	reg |= val & mask;
-
-	error = fg_write(chip, &reg, addr, 1);
-	return error;
-}
-
 #define IMA_IACS_CLR			BIT(2)
 #define IMA_IACS_RDY			BIT(1)
 static int fg_run_iacs_clear_sequence(struct fg_chip *chip)
 {
-	int rc = 0;
-	u8 temp;
+	int rc = 0, temp;
 
 	/* clear the error */
-	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_IMA_CFG(chip),
 				IMA_IACS_CLR, IMA_IACS_CLR);
 	if (rc) {
 		dev_err(chip->dev, "failed to set IMA_CFG: %d\n", rc);
 		return rc;
 	}
 
-	temp = 0x4;
-	rc = fg_write(chip, &temp, MEM_INTF_ADDR_LSB(chip) + 1, 1);
+	rc = regmap_write(chip->regmap, MEM_INTF_ADDR_LSB(chip) + 1, 0x4);
 	if (rc) {
 		dev_err(chip->dev, "failed to set MEM_INTF_ADDR_MSB: %d\n", rc);
 		return rc;
 	}
 
-	temp = 0x0;
-	rc = fg_write(chip, &temp, MEM_INTF_WR_DATA0(chip) + 3, 1);
+	rc = regmap_write(chip->regmap, MEM_INTF_WR_DATA0(chip) + 3, 0x0);
 	if (rc) {
 		dev_err(chip->dev, "failed to set WR_DATA3: %d\n", rc);
 		return rc;
 	}
 
-	rc = fg_read(chip, &temp, MEM_INTF_RD_DATA0(chip) + 3, 1);
+	rc = regmap_read(chip->regmap, MEM_INTF_RD_DATA0(chip) + 3, &temp);
 	if (rc) {
 		dev_err(chip->dev, "failed to set RD_DATA3: %d\n", rc);
 		return rc;
 	}
 
-	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_IMA_CFG(chip),
 				IMA_IACS_CLR, 0);
 	if (rc) {
 		dev_err(chip->dev, "failed to set IMA_CFG: %d\n", rc);
@@ -2161,10 +2110,22 @@ static int fg_check_and_clear_ima_errors(struct fg_chip *chip)
 	return rc;
 }
 
-#define RESET_MASK	(BIT(7) | BIT(5))
+#define SEC_ACCESS_OFFSET	0xD0
+#define SEC_ACCESS_VALUE	0xA5
+#define SEC_ACCESS_REG(chip)	(chip->soc_base + 0xd0)
+#define RESET_MASK		(BIT(7) | BIT(5))
 static int fg_reset(struct fg_chip *chip, bool reset)
 {
-	return fg_masked_write(chip, SOC_FG_RESET_REG(chip),
+	int rc;
+
+	/* Obtain acces to secure reset reg */
+	rc = regmap_write(chip->regmap, SEC_ACCESS_REG(chip), SEC_ACCESS_VALUE);
+	if (rc) {
+		dev_err(chip->dev, "failed to get access to sec regs: %d\n", rc);
+		return rc;
+	}
+
+	return regmap_update_bits(chip->regmap, SOC_FG_RESET_REG(chip),
 		0xff, reset ? RESET_MASK : 0);
 }
 
@@ -2236,7 +2197,7 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 	fg_stay_awake(chip, FG_RESET_WAKE);
 
 	/* Acquire IMA access forcibly from FG ALG */
-	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_IMA_CFG(chip),
 			EN_WR_FGXCT_PRD | EN_RD_FGXCT_PRD,
 			EN_WR_FGXCT_PRD | EN_RD_FGXCT_PRD);
 	if (rc) {
@@ -2245,7 +2206,7 @@ static int fg_check_ima_error_handling(struct fg_chip *chip)
 	}
 
 	/* Release the IMA access now so that FG reset can go through */
-	rc = fg_masked_write(chip, MEM_INTF_IMA_CFG(chip),
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_IMA_CFG(chip),
 			EN_WR_FGXCT_PRD | EN_RD_FGXCT_PRD, 0);
 	if (rc) {
 		dev_err(chip->dev, "failed to write IMA_CFG: %d\n", rc);
@@ -2287,22 +2248,22 @@ out:
 static int fg_check_alg_status(struct fg_chip *chip)
 {
 	int rc = 0, timeout = ALG_ST_CHECK_COUNT, count = 0;
-	u8 ima_opr_sts, alg_sts = 0, temp = 0;
+	int ima_opr_sts, alg_sts = 0, temp = 0;
 
 	if (!chip->reset_on_lockup)  {
 		dev_err(chip->dev, "FG lockup detection cannot be run\n");
 		return 0;
 	}
 
-	rc = fg_read(chip, &alg_sts, SOC_ALG_STATUS_REG(chip), 1);
+	rc = regmap_read(chip->regmap, SOC_ALG_STATUS_REG(chip), &alg_sts);
 	if (rc) {
 		dev_err(chip->dev, "failed to read SOC_ALG_ST: %d\n", rc);
 		return rc;
 	}
 
 	do {
-		rc = fg_read(chip, &ima_opr_sts,
-			MEM_INTF_IMA_OPR_STS(chip), 1);
+		rc = regmap_read(chip->regmap, MEM_INTF_IMA_OPR_STS(chip),
+				&ima_opr_sts);
 		if (!rc && !(ima_opr_sts & FGXCT_PRD))
 			break;
 
@@ -2312,8 +2273,7 @@ static int fg_check_alg_status(struct fg_chip *chip)
 			break;
 		}
 
-		rc = fg_read(chip, &temp, SOC_ALG_STATUS_REG(chip),
-			1);
+		rc = regmap_read(chip->regmap, SOC_ALG_STATUS_REG(chip), &temp);
 		if (rc) {
 			dev_err(chip->dev, "failed to read SOC_ALG_ST, rc=%d\n",
 				rc);
@@ -2339,7 +2299,7 @@ static int fg_check_alg_status(struct fg_chip *chip)
 static int fg_check_iacs_ready(struct fg_chip *chip)
 {
 	int rc = 0, timeout = 250;
-	u8 ima_opr_sts = 0;
+	int ima_opr_sts = 0;
 
 	/*
 	 * Additional delay to make sure IACS ready bit is set after
@@ -2348,8 +2308,8 @@ static int fg_check_iacs_ready(struct fg_chip *chip)
 
 	usleep_range(30, 35);
 	do {
-		rc = fg_read(chip, &ima_opr_sts,
-			MEM_INTF_IMA_OPR_STS(chip), 1);
+		rc = regmap_read(chip->regmap, MEM_INTF_IMA_OPR_STS(chip),
+				&ima_opr_sts);
 		if (!rc && (ima_opr_sts & IMA_IACS_RDY))
 			break;
 		/* delay for iacs_ready to be asserted */
@@ -2376,12 +2336,11 @@ static int fg_check_iacs_ready(struct fg_chip *chip)
 static int fg_config_access(struct fg_chip *chip, bool write,
 		bool burst)
 {
-	int rc;
-	u8 intf_ctl;
+	int rc, intf_ctl;
 
 	intf_ctl = (write ? INTF_CTL_WR_EN : 0) | (burst ? INTF_CTL_BURST : 0);
 
-	rc = fg_write(chip, &intf_ctl, MEM_INTF_CTL(chip), 1);
+	rc = regmap_write(chip->regmap, MEM_INTF_CTL(chip), intf_ctl);
 	if (rc) {
 		dev_err(chip->dev, "failed to set mem access bit\n");
 		return -EIO;
@@ -2394,7 +2353,8 @@ static int fg_set_ram_addr(struct fg_chip *chip, u16 *address)
 {
 	int rc;
 
-	rc = fg_write(chip, (u8 *) address, MEM_INTF_ADDR_LSB(chip), 2);
+	rc = regmap_bulk_write(chip->regmap, MEM_INTF_ADDR_LSB(chip),
+			(u8 *) address, 2);
 	if (rc) {
 		dev_err(chip->dev, "spmi write failed: addr=%03X, rc=%d\n",
 				MEM_INTF_ADDR_LSB(chip), rc);
@@ -2422,11 +2382,12 @@ static int fg_sub_sram_read(struct fg_chip *chip, u8 *val, u16 address, int len,
 	total_len = len;
 	while (len > 0) {
 		if (!offset) {
-			rc = fg_read(chip, rd_data, MEM_INTF_RD_DATA0(chip),
-							min(len, BUF_LEN));
+			rc = regmap_bulk_read(chip->regmap,
+					MEM_INTF_RD_DATA0(chip), rd_data,
+					min(len, BUF_LEN));
 		} else {
-			rc = fg_read(chip, rd_data,
-				MEM_INTF_RD_DATA0(chip) + offset,
+			rc = regmap_bulk_read(chip->regmap,
+				MEM_INTF_RD_DATA0(chip) + offset, rd_data,
 				min(len, BUF_LEN - offset));
 
 			/* manually set address to allow continous reads */
@@ -2463,15 +2424,16 @@ static int __fg_interleaved_sram_write(struct fg_chip *chip, u8 *val,
 			for (i = offset; i < (offset + num_bytes); i++)
 				byte_enable |= BIT(i);
 
-			rc = fg_write(chip, &byte_enable,
-				MEM_INTF_IMA_BYTE_EN(chip), 1);
+			rc = regmap_write(chip->regmap,
+				MEM_INTF_IMA_BYTE_EN(chip), byte_enable);
 			if (rc) {
 				dev_err(chip->dev, "failed to write to"\
 						" byte_en_reg: %d\n", rc);
 				return rc;
 			}
 			/* write data */
-		rc = fg_write(chip, word, MEM_INTF_WR_DATA0(chip) + offset,
+		rc = regmap_bulk_write(chip->regmap,
+				MEM_INTF_WR_DATA0(chip) + offset, word,
 				num_bytes);
 		if (rc) {
 			dev_err(chip->dev, "failed to write WR_DATA0: %d\n", rc);
@@ -2484,9 +2446,8 @@ static int __fg_interleaved_sram_write(struct fg_chip *chip, u8 *val,
 		 * SRAM as byte_en for WR_DATA3 is not set.
 		 */
 		if (!(byte_enable & BIT(3))) {
-			u8 dummy_byte = 0x0;
-			rc = fg_write(chip, &dummy_byte,
-				MEM_INTF_WR_DATA0(chip) + 3, 1);
+			rc = regmap_write(chip->regmap,
+					MEM_INTF_WR_DATA0(chip) + 3, 0);
 			if (rc) {
 				dev_err(chip->dev, "failed to write dummy data"\
 						" to WR_DATA3: %d\n", rc);
@@ -2520,10 +2481,9 @@ static int __fg_interleaved_sram_write(struct fg_chip *chip, u8 *val,
 #define RIF_MEM_ACCESS_REQ	BIT(7)
 static int fg_check_rif_mem_access(struct fg_chip *chip, bool *status)
 {
-	int rc;
-	u8 mem_if_sts;
+	int rc, mem_if_sts;
 
-	rc = fg_read(chip, &mem_if_sts, MEM_INTF_CFG(chip), 1);
+	rc = regmap_read(chip->regmap, MEM_INTF_CFG(chip), &mem_if_sts);
 	if (rc) {
 		dev_err(chip->dev, "failed to read rif_mem status: %d\n", rc);
 		return rc;
@@ -2563,7 +2523,7 @@ static int fg_interleaved_sram_config(struct fg_chip *chip, u8 *val,
 
 
 	/* configure for IMA access */
-	rc = fg_masked_write(chip, MEM_INTF_CFG(chip),
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_CFG(chip),
 				IMA_REQ_ACCESS, IMA_REQ_ACCESS);
 	if (rc) {
 		dev_err(chip->dev, "failed to set mem access bit: %d\n", rc);
@@ -2603,9 +2563,9 @@ static int fg_interleaved_sram_config(struct fg_chip *chip, u8 *val,
 static inline int fg_assert_sram_access(struct fg_chip *chip)
 {
 	int rc;
-	u8 mem_if_sts;
+	int mem_if_sts;
 
-	rc = fg_read(chip, &mem_if_sts, INT_RT_STS(chip->mem_base), 1);
+	rc = regmap_read(chip->regmap, INT_RT_STS(chip->mem_base), &mem_if_sts);
 	if (rc) {
 		dev_err(chip->dev, "failed to read mem status: %d\n", rc);
 		return rc;
@@ -2616,7 +2576,7 @@ static inline int fg_assert_sram_access(struct fg_chip *chip)
 		return -EINVAL;
 	}
 
-	rc = fg_read(chip, &mem_if_sts, MEM_INTF_CFG(chip), 1);
+	rc = regmap_read(chip->regmap, MEM_INTF_CFG(chip), &mem_if_sts);
 	if (rc) {
 		dev_err(chip->dev, "failed to read mem status: %d\n", rc);
 		return rc;
@@ -2632,11 +2592,10 @@ static inline int fg_assert_sram_access(struct fg_chip *chip)
 
 static bool fg_check_sram_access(struct fg_chip *chip)
 {
-	int rc;
-	u8 mem_if_sts;
+	int rc, mem_if_sts;
 	bool rif_mem_sts = false;
 
-	rc = fg_read(chip, &mem_if_sts, INT_RT_STS(chip->mem_base), 1);
+	rc = regmap_read(chip->regmap, INT_RT_STS(chip->mem_base), &mem_if_sts);
 	if (rc) {
 		dev_err(chip->dev, "failed to read mem status: %d\n", rc);
 		return false;
@@ -2658,7 +2617,7 @@ static int fg_req_and_wait_access(struct fg_chip *chip, int timeout)
 	int tries = 0;
 
 	if (!fg_check_sram_access(chip)) {
-		rc = fg_masked_write(chip, MEM_INTF_CFG(chip),
+		rc = regmap_update_bits(chip->regmap, MEM_INTF_CFG(chip),
 			RIF_MEM_ACCESS_REQ, RIF_MEM_ACCESS_REQ);
 		if (rc) {
 			dev_err(chip->dev, "failed to set mem access bit\n");
@@ -2682,7 +2641,7 @@ static int fg_req_and_wait_access(struct fg_chip *chip, int timeout)
 
 static int fg_release_access(struct fg_chip *chip)
 {
-	int rc = fg_masked_write(chip, MEM_INTF_CFG(chip),
+	int rc = regmap_update_bits(chip->regmap, MEM_INTF_CFG(chip),
 			RIF_MEM_ACCESS_REQ, 0);
 	fg_relax(chip, FG_SRAM_ACCESS_REQ_WAKE);
 
@@ -2720,100 +2679,6 @@ out:
 	}
 
 	if (!keep_access && !rc) {
-		rc = fg_release_access(chip);
-		if (rc) {
-			dev_err(chip->dev, "failed to set mem access bit\n");
-			rc = -EIO;
-		}
-	}
-
-	mutex_unlock(&chip->sram_rw_lock);
-	return rc;
-}
-
-static int fg_conventional_sram_write(struct fg_chip *chip, u8 *val, u16 address,
-		int len, int offset, bool keep_access)
-{
-	int rc = 0, user_cnt = 0, sublen;
-	bool access_configured = false;
-	u8 *wr_data = val, word[4];
-	u16 orig_address = address;
-
-	if (address < RAM_OFFSET && chip->pmic_version == PMI8950)
-		return -EINVAL;
-
-	if (offset > 3)
-		return -EINVAL;
-
-	address = ((orig_address + offset) / 4) * 4;
-	offset = (orig_address + offset) % 4;
-
-	mutex_lock(&chip->sram_rw_lock);
-	if (!fg_check_sram_access(chip)) {
-		rc = fg_req_and_wait_access(chip, MEM_IF_TIMEOUT_MS);
-		if (rc)
-			goto out;
-	}
-
-	while (len > 0) {
-		if (offset != 0) {
-			sublen = min(4 - offset, len);
-			rc = fg_sub_sram_read(chip, word, address, 4, 0);
-			if (rc)
-				goto out;
-			memcpy(word + offset, wr_data, sublen);
-			/* configure access as burst if more to write */
-			rc = fg_config_access(chip, 1, (len - sublen) > 0);
-			if (rc)
-				goto out;
-			rc = fg_set_ram_addr(chip, &address);
-			if (rc)
-				goto out;
-			offset = 0;
-			access_configured = true;
-		} else if (len >= 4) {
-			if (!access_configured) {
-				rc = fg_config_access(chip, 1, len > 4);
-				if (rc)
-					goto out;
-				rc = fg_set_ram_addr(chip, &address);
-				if (rc)
-					goto out;
-				access_configured = true;
-			}
-			sublen = 4;
-			memcpy(word, wr_data, 4);
-		} else if (len > 0 && len < 4) {
-			sublen = len;
-			rc = fg_sub_sram_read(chip, word, address, 4, 0);
-			if (rc)
-				goto out;
-			memcpy(word, wr_data, sublen);
-			rc = fg_config_access(chip, 1, 0);
-			if (rc)
-				goto out;
-			rc = fg_set_ram_addr(chip, &address);
-			if (rc)
-				goto out;
-			access_configured = true;
-		} else {
-			dev_err(chip->dev, "Invalid length: %d\n", len);
-			break;
-		}
-		rc = fg_write(chip, word, MEM_INTF_WR_DATA0(chip), 4);
-		if (rc) {
-			dev_err(chip->dev, "failed to write WR_DATA0: %d", rc);
-			goto out;
-		}
-		len -= sublen;
-		wr_data += sublen;
-		address += 4;
-	}
-
-out:
-	fg_assert_sram_access(chip);
-
-	if (!keep_access && (user_cnt == 0) && !rc) {
 		rc = fg_release_access(chip);
 		if (rc) {
 			dev_err(chip->dev, "failed to set mem access bit\n");
@@ -2883,7 +2748,8 @@ retry:
 
 out:
 	/* Release IMA access */
-	ret = fg_masked_write(chip, MEM_INTF_CFG(chip), IMA_REQ_ACCESS, 0);
+	ret = regmap_update_bits(chip->regmap, MEM_INTF_CFG(chip),
+			IMA_REQ_ACCESS, 0);
 	if (ret)
 		dev_err(chip->dev, "failed to reset IMA access bit: %d\n", ret);
 
@@ -2899,12 +2765,8 @@ out:
 static int fg_sram_write(struct fg_chip *chip, u8 *val, u16 address,
 		int len, int offset, bool keep_access)
 {
-	if (chip->ima_supported)
-		return fg_interleaved_sram_write(chip, val, address,
+	return fg_interleaved_sram_write(chip, val, address,
 				len, offset);
-	else
-		return fg_conventional_sram_write(chip, val, address,
-				len, offset, keep_access);
 }
 
 static void fg_encode(struct fg_sram_param param, int val, u8 *buf)
@@ -2935,9 +2797,8 @@ static int __fg_interleaved_sram_read(struct fg_chip *chip, u8 *val,
 	total_len = len;
 	while (len > 0) {
 		num_bytes = (offset + len) > BUF_LEN ? (BUF_LEN - offset) : len;
-		rc = fg_read(chip, rd_data,
-				MEM_INTF_RD_DATA0(chip) + offset,
-								num_bytes);
+		rc = regmap_bulk_read(chip->regmap, MEM_INTF_RD_DATA0(chip) + offset,
+				rd_data, num_bytes);
 		if (rc) {
 			dev_err(chip->dev, "failed to read RD_DATA0: %d\n", rc);
 			return rc;
@@ -2964,9 +2825,7 @@ static int __fg_interleaved_sram_read(struct fg_chip *chip, u8 *val,
 
 		if (len && (len + offset) < BUF_LEN) {
 			/* move to single mode */
-			u8 intr_ctl = 0;
-
-			rc = fg_write(chip, &intr_ctl, MEM_INTF_CTL(chip), 1);
+			rc = regmap_write(chip->regmap, MEM_INTF_CTL(chip), 0);
 			if (rc) {
 				dev_err(chip->dev, "failed to move to single"\
 						" mode: %d\n", rc);
@@ -2981,8 +2840,8 @@ static int __fg_interleaved_sram_read(struct fg_chip *chip, u8 *val,
 static int fg_interleaved_sram_read(struct fg_chip *chip, u8 *val, u16 address,
 		int len, int offset)
 {
-	int rc = 0, orig_address = address, ret = 0;
-	u8 start_beat_count, end_beat_count, count = 0;
+	int rc = 0, orig_address = address, ret = 0, start_beat_count,
+		end_beat_count, count = 0;
 	const u8 BEAT_COUNT_MASK = 0x0f;
 	bool retry = false;
 
@@ -3026,8 +2885,8 @@ retry:
 	}
 
 	/* read the start beat count */
-	rc = fg_read(chip, &start_beat_count,
-			MEM_INTF_BEAT_COUNT(chip), 1);
+	rc = regmap_read(chip->regmap, MEM_INTF_BEAT_COUNT(chip),
+			&start_beat_count);
 	if (rc) {
 		dev_err(chip->dev, "failed to read beat count: %d\n", rc);
 		retry = true;
@@ -3051,8 +2910,8 @@ retry:
 	}
 
 	/* read the end beat count */
-	rc = fg_read(chip, &end_beat_count,
-			MEM_INTF_BEAT_COUNT(chip), 1);
+	rc = regmap_read(chip->regmap, MEM_INTF_BEAT_COUNT(chip),
+			&end_beat_count);
 	if (rc) {
 		dev_err(chip->dev, "failed to read beat count: %d\n", rc);
 		retry = true;
@@ -3085,12 +2944,8 @@ exit:
 static int fg_sram_read(struct fg_chip *chip, u8 *val, u16 address,
 		int len, int offset, bool keep_access)
 {
-	if (chip->ima_supported)
-		return fg_interleaved_sram_read(chip, val, address,
-				len, offset);
-	else
-		return fg_conventional_sram_read(chip, val, address,
-				len, offset, keep_access);
+	return fg_interleaved_sram_read(chip, val, address,
+			len, offset);
 }
 
 static int fg_get_param(struct fg_chip *chip, enum fg_sram_param_id id,
@@ -3112,13 +2967,19 @@ static int fg_get_param(struct fg_chip *chip, enum fg_sram_param_id id,
 				false);
 		break;
 	case BATT_BASE_PARAM:
-		rc = fg_read(chip, buf, chip->batt_base + param.address, param.length);
+		rc = regmap_bulk_read(chip->regmap,
+				chip->batt_base + param.address,
+				buf, param.length);
 		break;
 	case SOC_BASE_PARAM:
-		rc = fg_read(chip, buf, chip->soc_base + param.address, param.length);
+		rc = regmap_bulk_read(chip->regmap,
+				chip->soc_base + param.address,
+				buf, param.length);
 		break;
 	case MEM_IF_PARAM:
-		rc = fg_read(chip, buf, chip->mem_base + param.address, param.length);
+		rc = regmap_bulk_read(chip->regmap,
+				chip->mem_base + param.address,
+				buf, param.length);
 		break;
 	default:
 		dev_err(chip->dev, "Invalid param type: %d\n", param.type);
@@ -3157,10 +3018,11 @@ static int fg_sram_masked_write(struct fg_chip *chip, u16 addr,
 static int fg_get_capacity(struct fg_chip *chip, int *val)
 {
 	u8 cap[2];
-	int error = fg_read(chip, cap, BATT_CAPACITY_REG(chip), 2);
-	if (error)
-		return error;
-	//choose lesser of two
+	int rc = regmap_bulk_read(chip->regmap, BATT_CAPACITY_REG(chip), cap, 2);
+	if (rc)
+		return rc;
+
+	/*choose lesser of two*/
 	if (cap[0] != cap[1]) {
 		dev_warn(chip->dev, "cap not same\n");
 		cap[0] = cap[0] < cap[1] ? cap[0] : cap[1];
@@ -3209,10 +3071,10 @@ static int fg_get_health_status(struct fg_chip *chip)
 static bool is_battery_missing(struct fg_chip *chip)
 {
 	int rc;
-	u8 fg_batt_sts;
+	int fg_batt_sts;
 
-	rc = fg_read(chip, &fg_batt_sts,
-				 INT_RT_STS(chip->batt_base), 1);
+	rc = regmap_read(chip->regmap, INT_RT_STS(chip->batt_base),
+			&fg_batt_sts);
 	if (rc) {
 		dev_err(chip->dev, "failed to read batt int_rt_sts: %d", rc);
 		return false;
@@ -3292,6 +3154,11 @@ static void esr_filter_work(struct work_struct *work)
 	struct fg_chip *chip = container_of(work,
 			struct fg_chip, esr_filter_work);
 	int rc, batt_temp;
+
+	if (chip->pmic_version == PMI8950) {
+		dev_err(chip->dev, "incorrect hw rev for esr filter work\n");
+		return;
+	}
 
 	rc = fg_get_temperature(chip, &batt_temp);
 	if (rc < 0) {
@@ -5075,19 +4942,18 @@ static int fg_of_init(struct fg_chip *chip)
 #define DMA_CLEAR_LOG_BIT			BIT(0)
 int fg_check_and_clear_dma_errors(struct fg_chip *chip)
 {
-	int rc;
-	u8 dma_sts;
+	int rc, dma_sts;
 	bool error_present;
 
-	//TODO: cleanup DMA sts reads
-	rc = fg_read(chip, &dma_sts, chip->mem_base + 0x70, 1);
+	rc = regmap_read(chip->regmap, MEM_INTF_DMA_STS(chip), &dma_sts);
 	if (rc < 0) {
 		dev_err(chip->dev, "failed to dma_sts, rc=%d\n", rc);
 		return rc;
 	}
 
 	error_present = dma_sts & (DMA_WRITE_ERROR_BIT | DMA_READ_ERROR_BIT);
-	rc = fg_masked_write(chip, chip->mem_base + 0x71, DMA_CLEAR_LOG_BIT,
+	rc = regmap_update_bits(chip->regmap, MEM_INTF_DMA_CTL(chip),
+			DMA_CLEAR_LOG_BIT,
 			error_present ? DMA_CLEAR_LOG_BIT : 0);
 	if (rc < 0) {
 		dev_err(chip->dev, "failed to write dma_ctl, rc=%d\n", rc);
@@ -5100,6 +4966,7 @@ int fg_check_and_clear_dma_errors(struct fg_chip *chip)
 static void fg_rslow_update(struct fg_chip *chip)
 {
 #if 0
+TODO:
 	int battery_soc_1b;
 
 	int rc = fg_get_param(chip, FG_DATA_BATT_SOC, &battery_soc_1b);
