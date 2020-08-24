@@ -600,6 +600,7 @@
 		};
 
 		rng@22000 {
+			status = "disabled";
 			compatible = "qcom,prng";
 			reg = <0x000e3000 0x1000>;
 			clocks = <&gcc GCC_PRNG_AHB_CLK>;
