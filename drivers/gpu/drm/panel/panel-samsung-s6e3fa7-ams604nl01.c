@@ -5,6 +5,7 @@
 #include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
 
@@ -456,6 +457,8 @@ static int s6e3fa7_ams604nl01_prepare(struct drm_panel *panel)
 	if (ctx->prepared)
 		return 0;
 
+	pinctrl_pm_select_default_state(dev);
+
 	s6e3fa7_ams604nl01_reset(ctx);
 
 	ret = s6e3fa7_ams604nl01_on(panel);
@@ -483,6 +486,7 @@ static int s6e3fa7_ams604nl01_unprepare(struct drm_panel *panel)
 		dev_err(dev, "Failed to un-initialize panel: %d\n", ret);
 
 	gpiod_set_value_cansleep(ctx->reset_gpio, 0);
+	pinctrl_pm_select_sleep_state(dev);
 
 	ctx->prepared = false;
 	return 0;
