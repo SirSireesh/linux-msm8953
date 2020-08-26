@@ -447,13 +447,16 @@
 };
 
 &dsi0 {
-	pinctrl-names = "default", "sleep";
-	pinctrl-0 = <&pmx_mdss_default &mdss_te_default>;
-	pinctrl-1 = <&pmx_mdss_sleep &mdss_te_default>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&mdss_te_default>;
 
 	panel@0 {
 		compatible = "samsung,s6e3fa7-ams604nl01-fhd";
 		reg = <0>;
+
+		pinctrl-names = "default", "sleep";
+		pinctrl-0 = <&pmx_mdss_default>;
+		pinctrl-1 = <&pmx_mdss_sleep>;
 
 		reset-gpios = <&msmgpio 50 GPIO_ACTIVE_HIGH>;
 
