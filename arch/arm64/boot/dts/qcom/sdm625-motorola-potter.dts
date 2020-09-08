@@ -194,9 +194,9 @@
 		compatible = "nxp,pn544-i2c";
 		reg = <0x28>;
 		interrupt-parent = <&msmgpio>;
-		interrupts = <17 0x00>;
+		interrupts = <13 0x00>;
 
-		enable-gpios = <&msmgpio 16 GPIO_ACTIVE_HIGH>; /* EN */
+		enable-gpios = <&msmgpio 16 GPIO_ACTIVE_LOW>; /* EN */
 		firmware-gpios = <&msmgpio 62 GPIO_ACTIVE_HIGH>; /* Firmware */
 
 		nxp,pnxx-discharge-delay = <100>;
