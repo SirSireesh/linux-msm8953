@@ -122,12 +122,12 @@ struct ipa_endpoint_rx_data {
  */
 struct ipa_endpoint_config_data {
 	u32 resource_group;
+	bool skip_config;
 	bool checksum;
 	bool qmap;
 	bool aggregation;
 	bool status_enable;
 	bool dma_mode;
-	bool skip_config;
 	enum ipa_endpoint_name dma_endpoint;
 	union {
 		struct ipa_endpoint_tx_data tx;
@@ -172,8 +172,8 @@ struct ipa_gsi_endpoint_data {
 	u8 ee_id;		/* enum gsi_ee_id */
 	u8 channel_id;
 	u8 endpoint_id;
+	const char *channel_name; /* used only for SPS */
 	bool toward_ipa;
-	char *channel_name;	/* used only for BAM DMA channels */
 
 	struct gsi_channel_data channel;
 	struct ipa_endpoint_data endpoint;
@@ -307,6 +307,7 @@ struct ipa_data {
 	const struct ipa_clock_data *clock_data;
 };
 
+extern const struct ipa_data ipa_data_msm8953;
 extern const struct ipa_data ipa_data_sdm845;
 extern const struct ipa_data ipa_data_sc7180;
 
