@@ -204,7 +204,7 @@ static void send_uc_command(struct ipa *ipa, u32 command, u32 command_param)
 	/* Use an interrupt to tell the microcontroller the command is ready */
 	val = u32_encode_bits(1, UC_INTR_FMASK);
 
-	iowrite32(val, ipa->reg_virt + IPA_REG_IRQ_UC_OFFSET);
+	iowrite32(val, ipa->reg_virt + ipa_reg_irq_uc_offset(ipa->version));
 }
 
 /* Tell the microcontroller the AP is shutting down */

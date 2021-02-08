@@ -396,7 +396,7 @@ static void ipa_hardware_config(struct ipa *ipa)
 	/* IPA v4.5 has no backward compatibility register */
 	if (version < IPA_VERSION_4_5) {
 		val = ipa_reg_bcr_val(version);
-		iowrite32(val, ipa->reg_virt + IPA_REG_BCR_OFFSET);
+		iowrite32(val, ipa->reg_virt + ipa_reg_bcr_offset(ipa->version));
 	}
 
 	/* Implement some hardware workarounds */
