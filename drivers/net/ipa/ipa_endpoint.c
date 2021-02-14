@@ -12,7 +12,7 @@
 #include <linux/dma-direction.h>
 
 #include "gsi.h"
-#include "gsi_trans.h"
+#include "ipa_trans.h"
 #include "ipa.h"
 #include "ipa_data.h"
 #include "ipa_endpoint.h"
@@ -236,7 +236,7 @@ static bool ipa_endpoint_data_valid(struct ipa *ipa, u32 count,
 #endif /* !IPA_VALIDATE */
 
 /* Allocate a transaction to use on a non-command endpoint */
-static struct gsi_trans *ipa_endpoint_trans_alloc(struct ipa_endpoint *endpoint,
+static struct ipa_trans *ipa_endpoint_trans_alloc(struct ipa_endpoint *endpoint,
 						  u32 tre_count)
 {
 	struct gsi *gsi = &endpoint->ipa->gsi;
@@ -391,7 +391,7 @@ void ipa_endpoint_modem_pause_all(struct ipa *ipa, bool enable)
 int ipa_endpoint_modem_exception_reset_all(struct ipa *ipa)
 {
 	u32 initialized = ipa->initialized;
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 	u32 count;
 
 	/* We need one command per modem TX endpoint.  We can get an upper
@@ -431,7 +431,7 @@ int ipa_endpoint_modem_exception_reset_all(struct ipa *ipa)
 	ipa_cmd_tag_process_add(trans);
 
 	/* XXX This should have a 1 second timeout */
-	gsi_trans_commit_wait(trans);
+	ipa_trans_commit_wait(trans);
 
 	return 0;
 }
@@ -912,7 +912,7 @@ static void ipa_endpoint_init_seq(struct ipa_endpoint *endpoint)
  */
 int ipa_endpoint_skb_tx(struct ipa_endpoint *endpoint, struct sk_buff *skb)
 {
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 	u32 nr_frags;
 	int ret;
 
@@ -931,17 +931,17 @@ int ipa_endpoint_skb_tx(struct ipa_endpoint *endpoint, struct sk_buff *skb)
 	if (!trans)
 		return -EBUSY;
 
-	ret = gsi_trans_skb_add(trans, skb);
+	ret = ipa_trans_skb_add(trans, skb);
 	if (ret)
 		goto err_trans_free;
 	trans->data = skb;	/* transaction owns skb now */
 
-	gsi_trans_commit(trans, !netdev_xmit_more());
+	ipa_trans_commit(trans, !netdev_xmit_more());
 
 	return 0;
 
 err_trans_free:
-	gsi_trans_free(trans);
+	ipa_trans_free(trans);
 
 	return -ENOMEM;
 }
@@ -978,7 +978,7 @@ static void ipa_endpoint_status(struct ipa_endpoint *endpoint)
 
 static int ipa_endpoint_replenish_one(struct ipa_endpoint *endpoint)
 {
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 	bool doorbell = false;
 	struct page *page;
 	u32 offset;
@@ -997,7 +997,7 @@ static int ipa_endpoint_replenish_one(struct ipa_endpoint *endpoint)
 	offset = NET_SKB_PAD;
 	len = IPA_RX_BUFFER_SIZE - offset;
 
-	ret = gsi_trans_page_add(trans, page, len, offset);
+	ret = ipa_trans_page_add(trans, page, len, offset);
 	if (ret)
 		goto err_trans_free;
 	trans->data = page;	/* transaction owns page now */
@@ -1007,12 +1007,12 @@ static int ipa_endpoint_replenish_one(struct ipa_endpoint *endpoint)
 		endpoint->replenish_ready = 0;
 	}
 
-	gsi_trans_commit(trans, doorbell);
+	ipa_trans_commit(trans, doorbell);
 
 	return 0;
 
 err_trans_free:
-	gsi_trans_free(trans);
+	ipa_trans_free(trans);
 err_free_pages:
 	__free_pages(page, get_order(IPA_RX_BUFFER_SIZE));
 
@@ -1252,13 +1252,13 @@ static void ipa_endpoint_status_parse(struct ipa_endpoint *endpoint,
 
 /* Complete a TX transaction, command or from ipa_endpoint_skb_tx() */
 static void ipa_endpoint_tx_complete(struct ipa_endpoint *endpoint,
-				     struct gsi_trans *trans)
+				     struct ipa_trans *trans)
 {
 }
 
 /* Complete transaction initiated in ipa_endpoint_replenish_one() */
 static void ipa_endpoint_rx_complete(struct ipa_endpoint *endpoint,
-				     struct gsi_trans *trans)
+				     struct ipa_trans *trans)
 {
 	struct page *page;
 
@@ -1276,7 +1276,7 @@ static void ipa_endpoint_rx_complete(struct ipa_endpoint *endpoint,
 }
 
 void ipa_endpoint_trans_complete(struct ipa_endpoint *endpoint,
-				 struct gsi_trans *trans)
+				 struct ipa_trans *trans)
 {
 	if (endpoint->toward_ipa)
 		ipa_endpoint_tx_complete(endpoint, trans);
@@ -1285,7 +1285,7 @@ void ipa_endpoint_trans_complete(struct ipa_endpoint *endpoint,
 }
 
 void ipa_endpoint_trans_release(struct ipa_endpoint *endpoint,
-				struct gsi_trans *trans)
+				struct ipa_trans *trans)
 {
 	if (endpoint->toward_ipa) {
 		struct ipa *ipa = endpoint->ipa;

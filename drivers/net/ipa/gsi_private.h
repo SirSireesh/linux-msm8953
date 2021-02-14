@@ -6,38 +6,38 @@
 #ifndef _GSI_PRIVATE_H_
 #define _GSI_PRIVATE_H_
 
-/* === Only "gsi.c" and "gsi_trans.c" should include this file === */
+/* === Only "gsi.c" and "ipa_trans.c" should include this file === */
 
 #include <linux/types.h>
 
-struct gsi_trans;
+struct ipa_trans;
 struct gsi_ring;
 struct gsi_channel;
 
 #define GSI_RING_ELEMENT_SIZE	16	/* bytes */
 
 /* Return the entry that follows one provided in a transaction pool */
-void *gsi_trans_pool_next(struct gsi_trans_pool *pool, void *element);
+void *ipa_trans_pool_next(struct ipa_trans_pool *pool, void *element);
 
 /**
- * gsi_trans_move_complete() - Mark a GSI transaction completed
+ * ipa_trans_move_complete() - Mark a GSI transaction completed
  * @trans:	Transaction to commit
  */
-void gsi_trans_move_complete(struct gsi_trans *trans);
+void ipa_trans_move_complete(struct ipa_trans *trans);
 
 /**
- * gsi_trans_move_polled() - Mark a transaction polled
+ * ipa_trans_move_polled() - Mark a transaction polled
  * @trans:	Transaction to update
  */
-void gsi_trans_move_polled(struct gsi_trans *trans);
+void ipa_trans_move_polled(struct ipa_trans *trans);
 
 /**
- * gsi_trans_complete() - Complete a GSI transaction
+ * ipa_trans_complete() - Complete a GSI transaction
  * @trans:	Transaction to complete
  *
  * Marks a transaction complete (including freeing it).
  */
-void gsi_trans_complete(struct gsi_trans *trans);
+void ipa_trans_complete(struct ipa_trans *trans);
 
 /**
  * gsi_channel_trans_mapped() - Return a transaction mapped to a TRE index
@@ -46,16 +46,16 @@ void gsi_trans_complete(struct gsi_trans *trans);
  *
  * Return:	The GSI transaction pointer associated with the TRE index
  */
-struct gsi_trans *gsi_channel_trans_mapped(struct gsi_channel *channel,
+struct ipa_trans *gsi_channel_trans_mapped(struct gsi_channel *channel,
 					   u32 index);
 
-/**
+/*:
  * gsi_channel_trans_complete() - Return a channel's next completed transaction
  * @channel:	Channel whose next transaction is to be returned
  *
  * Return:	The next completed transaction, or NULL if nothing new
  */
-struct gsi_trans *gsi_channel_trans_complete(struct gsi_channel *channel);
+struct ipa_trans *gsi_channel_trans_complete(struct gsi_channel *channel);
 
 /**
  * gsi_channel_trans_cancel_pending() - Cancel pending transactions

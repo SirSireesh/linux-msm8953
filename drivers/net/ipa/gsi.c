@@ -19,6 +19,7 @@
 #include "gsi_reg.h"
 #include "gsi_private.h"
 #include "gsi_trans.h"
+#include "ipa_trans.h"
 #include "ipa_gsi.h"
 #include "ipa_data.h"
 #include "ipa_version.h"
@@ -696,19 +697,19 @@ static void gsi_evt_ring_program(struct gsi *gsi, u32 evt_ring_id)
 }
 
 /* Return the last (most recent) transaction completed on a channel. */
-static struct gsi_trans *gsi_channel_trans_last(struct gsi_channel *channel)
+static struct ipa_trans *gsi_channel_trans_last(struct gsi_channel *channel)
 {
-	struct gsi_trans_info *trans_info = &channel->trans_info;
-	struct gsi_trans *trans;
+	struct ipa_trans_info *trans_info = &channel->trans_info;
+	struct ipa_trans *trans;
 
 	spin_lock_bh(&trans_info->spinlock);
 
 	if (!list_empty(&trans_info->complete))
 		trans = list_last_entry(&trans_info->complete,
-					struct gsi_trans, links);
+					struct ipa_trans, links);
 	else if (!list_empty(&trans_info->polled))
 		trans = list_last_entry(&trans_info->polled,
-					struct gsi_trans, links);
+					struct ipa_trans, links);
 	else
 		trans = NULL;
 
@@ -724,13 +725,13 @@ static struct gsi_trans *gsi_channel_trans_last(struct gsi_channel *channel)
 /* Wait for transaction activity on a channel to complete */
 static void gsi_channel_trans_quiesce(struct gsi_channel *channel)
 {
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 
 	/* Get the last transaction, and wait for it to complete */
 	trans = gsi_channel_trans_last(channel);
 	if (trans) {
 		wait_for_completion(&trans->completion);
-		gsi_trans_free(trans);
+		ipa_trans_free(trans);
 	}
 }
 
@@ -991,7 +992,7 @@ void gsi_channel_tx_queued(struct gsi_channel *channel)
  * point in time.
  */
 static void
-gsi_channel_tx_update(struct gsi_channel *channel, struct gsi_trans *trans)
+gsi_channel_tx_update(struct gsi_channel *channel, struct ipa_trans *trans)
 {
 	u64 byte_count = trans->byte_count + trans->len;
 	u64 trans_count = trans->trans_count + 1;
@@ -1286,7 +1287,7 @@ static void gsi_irq_exit(struct gsi *gsi)
 }
 
 /* Return the transaction associated with a transfer completion event */
-static struct gsi_trans *gsi_event_trans(struct gsi_channel *channel,
+static struct ipa_trans *gsi_event_trans(struct gsi_channel *channel,
 					 struct gsi_event *event)
 {
 	u32 tre_offset;
@@ -1322,10 +1323,10 @@ static void gsi_evt_ring_rx_update(struct gsi_evt_ring *evt_ring, u32 index)
 {
 	struct gsi_channel *channel = evt_ring->channel;
 	struct gsi_ring *ring = &evt_ring->ring;
-	struct gsi_trans_info *trans_info;
+	struct ipa_trans_info *trans_info;
 	struct gsi_event *event_done;
 	struct gsi_event *event;
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 	u32 byte_count = 0;
 	u32 old_index;
 	u32 event_avail;
@@ -1355,7 +1356,7 @@ static void gsi_evt_ring_rx_update(struct gsi_evt_ring *evt_ring, u32 index)
 			event++;
 		else
 			event = gsi_ring_virt(ring, 0);
-		trans = gsi_trans_pool_next(&trans_info->pool, trans);
+		trans = ipa_trans_pool_next(&trans_info->pool, trans);
 	} while (event != event_done);
 
 	/* We record RX bytes when they are received */
@@ -1435,7 +1436,7 @@ static void gsi_channel_update(struct gsi_channel *channel)
 	u32 evt_ring_id = channel->evt_ring_id;
 	struct gsi *gsi = channel->gsi;
 	struct gsi_evt_ring *evt_ring;
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 	struct gsi_ring *ring;
 	u32 offset;
 	u32 index;
@@ -1468,12 +1469,12 @@ static void gsi_channel_update(struct gsi_channel *channel)
 	else
 		gsi_evt_ring_rx_update(evt_ring, index);
 
-	gsi_trans_move_complete(trans);
+	ipa_trans_move_complete(trans);
 
 	/* Tell the hardware we've handled these events */
 	gsi_evt_ring_doorbell(channel->gsi, channel->evt_ring_id, index);
 
-	gsi_trans_free(trans);
+	ipa_trans_free(trans);
 }
 
 /**
@@ -1488,9 +1489,9 @@ static void gsi_channel_update(struct gsi_channel *channel)
  * completed list and the new first entry is returned.  If there are no more
  * completed transactions, a null pointer is returned.
  */
-static struct gsi_trans *gsi_channel_poll_one(struct gsi_channel *channel)
+static struct ipa_trans *gsi_channel_poll_one(struct gsi_channel *channel)
 {
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 
 	/* Get the first transaction from the completed list */
 	trans = gsi_channel_trans_complete(channel);
@@ -1501,7 +1502,7 @@ static struct gsi_trans *gsi_channel_poll_one(struct gsi_channel *channel)
 	}
 
 	if (trans)
-		gsi_trans_move_polled(trans);
+		ipa_trans_move_polled(trans);
 
 	return trans;
 }
@@ -1515,7 +1516,7 @@ static struct gsi_trans *gsi_channel_poll_one(struct gsi_channel *channel)
  *
  * Single transactions completed by hardware are polled until either
  * the budget is exhausted, or there are no more.  Each transaction
- * polled is passed to gsi_trans_complete(), to perform remaining
+ * polled is passed to ipa_trans_complete(), to perform remaining
  * completion processing and retire/free the transaction.
  */
 static int gsi_channel_poll(struct napi_struct *napi, int budget)
@@ -1525,13 +1526,13 @@ static int gsi_channel_poll(struct napi_struct *napi, int budget)
 
 	channel = container_of(napi, struct gsi_channel, napi);
 	while (count < budget) {
-		struct gsi_trans *trans;
+		struct ipa_trans *trans;
 
 		count++;
 		trans = gsi_channel_poll_one(channel);
 		if (!trans)
 			break;
-		gsi_trans_complete(trans);
+		ipa_trans_complete(trans);
 	}
 
 	if (count < budget) {
@@ -2199,7 +2200,7 @@ void gsi_exit(struct gsi *gsi)
  * maximum number of outstanding TREs allows the number of entries in
  * a pool to avoid crossing that power-of-2 boundary, and this can
  * substantially reduce pool memory requirements.  The number we
- * reduce it by matches the number added in gsi_trans_pool_init().
+ * reduce it by matches the number added in ipa_trans_pool_init().
  */
 u32 gsi_channel_tre_max(struct gsi *gsi, u32 channel_id)
 {

@@ -7,19 +7,20 @@
 #include <linux/types.h>
 
 #include "ipa_gsi.h"
-#include "gsi_trans.h"
+#include "ipa_trans.h"
 #include "ipa.h"
 #include "ipa_endpoint.h"
 #include "ipa_data.h"
+#include "gsi.h"
 
-void ipa_gsi_trans_complete(struct gsi_trans *trans)
+void ipa_gsi_trans_complete(struct ipa_trans *trans)
 {
 	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
 
 	ipa_endpoint_trans_complete(ipa->channel_map[trans->channel_id], trans);
 }
 
-void ipa_gsi_trans_release(struct gsi_trans *trans)
+void ipa_gsi_trans_release(struct ipa_trans *trans)
 {
 	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
 

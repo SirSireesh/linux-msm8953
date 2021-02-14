@@ -18,7 +18,7 @@
 #include "ipa_cmd.h"
 #include "ipa_mem.h"
 #include "ipa_table.h"
-#include "gsi_trans.h"
+#include "ipa_trans.h"
 
 /* "Canary" value placed between memory regions to detect overflow */
 #define IPA_MEM_CANARY_VAL		cpu_to_le32(0xdeadbeef)
@@ -28,7 +28,7 @@
 
 /* Add an immediate command to a transaction that zeroes a memory region */
 static void
-ipa_mem_zero_region_add(struct gsi_trans *trans, const struct ipa_mem *mem)
+ipa_mem_zero_region_add(struct ipa_trans *trans, const struct ipa_mem *mem)
 {
 	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
 	dma_addr_t addr = ipa->zero_addr;
@@ -58,7 +58,7 @@ ipa_mem_zero_region_add(struct gsi_trans *trans, const struct ipa_mem *mem)
 int ipa_mem_setup(struct ipa *ipa)
 {
 	dma_addr_t addr = ipa->zero_addr;
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 	u32 offset;
 	u16 size;
 
@@ -86,7 +86,7 @@ int ipa_mem_setup(struct ipa *ipa)
 
 	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
 
-	gsi_trans_commit_wait(trans);
+	ipa_trans_commit_wait(trans);
 
 	/* Tell the hardware where the processing context area is located */
 	iowrite32(ipa->mem_offset + ipa->mem[IPA_MEM_MODEM_PROC_CTX].offset,
@@ -250,7 +250,7 @@ void ipa_mem_deconfig(struct ipa *ipa)
  */
 int ipa_mem_zero_modem(struct ipa *ipa)
 {
-	struct gsi_trans *trans;
+	struct ipa_trans *trans;
 
 	/* Get a transaction to zero the modem memory, modem header,
 	 * and modem processing context regions.
@@ -268,7 +268,7 @@ int ipa_mem_zero_modem(struct ipa *ipa)
 
 	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
 
-	gsi_trans_commit_wait(trans);
+	ipa_trans_commit_wait(trans);
 
 	return 0;
 }

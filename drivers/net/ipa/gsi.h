@@ -14,6 +14,7 @@
 #include <linux/netdevice.h>
 
 #include "ipa_version.h"
+#include "ipa_trans_info.h"
 
 /* Maximum number of channels and event rings supported by the driver */
 #define GSI_CHANNEL_COUNT_MAX	17
@@ -27,7 +28,7 @@ struct scatterlist;
 struct platform_device;
 
 struct gsi;
-struct gsi_trans;
+struct ipa_trans;
 struct gsi_channel_data;
 struct ipa_gsi_endpoint_data;
 
@@ -70,30 +71,6 @@ struct gsi_ring {
  * The result of a pool allocation of multiple elements is always
  * contiguous.
  */
-struct gsi_trans_pool {
-	void *base;			/* base address of element pool */
-	u32 count;			/* # elements in the pool */
-	u32 free;			/* next free element in pool (modulo) */
-	u32 size;			/* size (bytes) of an element */
-	u32 max_alloc;			/* max allocation request */
-	dma_addr_t addr;		/* DMA address if DMA pool (or 0) */
-};
-
-struct gsi_trans_info {
-	atomic_t tre_avail;		/* TREs available for allocation */
-	struct gsi_trans_pool pool;	/* transaction pool */
-	struct gsi_trans_pool sg_pool;	/* scatterlist pool */
-	struct gsi_trans_pool cmd_pool;	/* command payload DMA pool */
-	struct gsi_trans_pool info_pool;/* command information pool */
-	struct gsi_trans **map;		/* TRE -> transaction map */
-
-	spinlock_t spinlock;		/* protects updates to the lists */
-	struct list_head alloc;		/* allocated, not committed */
-	struct list_head pending;	/* committed, awaiting completion */
-	struct list_head complete;	/* completed, awaiting poll */
-	struct list_head polled;	/* returned by gsi_channel_poll_one() */
-};
-
 /* Hardware values signifying the state of a channel */
 enum gsi_channel_state {
 	GSI_CHANNEL_STATE_NOT_ALLOCATED		= 0x0,
@@ -127,7 +104,7 @@ struct gsi_channel {
 	u64 compl_byte_count;		/* last reported completed byte count */
 	u64 compl_trans_count;		/* ...and completed trans count */
 
-	struct gsi_trans_info trans_info;
+	struct ipa_trans_info trans_info;
 
 	struct napi_struct napi;
 };
