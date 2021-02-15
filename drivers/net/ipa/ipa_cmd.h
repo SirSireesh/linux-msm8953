@@ -15,7 +15,8 @@ struct scatterlist;
 struct ipa;
 struct ipa_mem;
 struct ipa_trans;
-struct gsi_channel;
+struct ipa_trans_info;
+struct gsi_channel; /*FIXME*/
 
 /**
  * enum ipa_cmd_opcode:	IPA immediate commands
@@ -108,7 +109,7 @@ int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
 void ipa_cmd_pool_exit(struct gsi_channel *channel);
 
 /**
- * ipa_cmd_table_init_add() - Add table init command to a transaction
+ * ipa_cmd_table_init_add_v3() - Add table init command to a transaction
  * @trans:	GSI transaction
  * @opcode:	IPA immediate command opcode
  * @size:	Size of non-hashed routing table memory
@@ -120,10 +121,18 @@ void ipa_cmd_pool_exit(struct gsi_channel *channel);
  *
  * If hash_size is 0, hash_offset and hash_addr are ignored.
  */
+void ipa_v3_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
+			       u16 size, u32 offset, dma_addr_t addr,
+			       u16 hash_size, u32 hash_offset,
+			       dma_addr_t hash_addr);
+
+void ipa_v2_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
+			       u16 size, u32 offset, dma_addr_t addr, bool ipv4);
+
 void ipa_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
 			    u16 size, u32 offset, dma_addr_t addr,
 			    u16 hash_size, u32 hash_offset,
-			    dma_addr_t hash_addr);
+			    dma_addr_t hash_addr, bool ipv4);
 
 /**
  * ipa_cmd_hdr_init_local_add() - Add a header init command to a transaction
