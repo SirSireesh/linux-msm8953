@@ -31,6 +31,7 @@
 #include "ipa_uc.h"
 #include "ipa_interrupt.h"
 #include "gsi_trans.h"
+#include "bam_trans.h"
 
 /**
  * DOC: The IP Accelerator
@@ -58,12 +59,15 @@
  * core.  The GSI implements a set of "channels" used for communication
  * between the AP and the IPA.
  *
- * The IPA layer uses GSI channels to implement its "endpoints".  And while
- * a GSI channel carries data between the AP and the IPA, a pair of IPA
- * endpoints is used to carry traffic between two EEs.  Specifically, the main
- * modem network interface is implemented by two pairs of endpoints:  a TX
+ * The IPA layer uses GSI channels or BAM pipes to implement its "endpoints".
+ * And while a GSI channel carries data between the AP and the IPA, a pair of
+ * IPA endpoints is used to carry traffic between two EEs.  Specifically, the
+ * main modem network interface is implemented by two pairs of endpoints:  a TX
  * endpoint on the AP coupled with an RX endpoint on the modem; and another
  * RX endpoint on the AP receiving data from a TX endpoint on the modem.
+ *
+ * For BAM based transport, a pair of BAM pipes are used for TX and RX between
+ * the AP and IPA, and between IPA and other EEs.
  */
 
 /* The name of the GSI firmware file relative to /lib/firmware */
@@ -119,7 +123,11 @@ int ipa_setup(struct ipa *ipa)
 	struct device *dev = &ipa->pdev->dev;
 	int ret;
 
-	ret = gsi_setup(&ipa->gsi);
+	if (ipa->version == IPA_VERSION_2_6L)
+		ret = bam_setup(&ipa->bam);
+	else
+		ret = gsi_setup(&ipa->gsi);
+
 	if (ret)
 		return ret;
 
@@ -128,8 +136,12 @@ int ipa_setup(struct ipa *ipa)
 		ret = PTR_ERR(ipa->interrupt);
 		goto err_gsi_teardown;
 	}
-	ipa_interrupt_add(ipa->interrupt, IPA_IRQ_TX_SUSPEND,
-			  ipa_suspend_handler);
+	if (ipa->version == IPA_VERSION_2_6L)
+		ipa_interrupt_add(ipa->interrupt, IPA_V2_IRQ_TX_SUSPEND,
+				ipa_suspend_handler);
+	else
+		ipa_interrupt_add(ipa->interrupt, IPA_IRQ_TX_SUSPEND,
+				ipa_suspend_handler);
 
 	ipa_uc_setup(ipa);
 
@@ -190,10 +202,16 @@ err_endpoint_teardown:
 	(void)device_init_wakeup(dev, false);
 err_uc_teardown:
 	ipa_uc_teardown(ipa);
-	ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
+	if (ipa->version == IPA_VERSION_2_6L)
+		ipa_interrupt_remove(ipa->interrupt, IPA_V2_IRQ_TX_SUSPEND);
+	else
+		ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
 	ipa_interrupt_teardown(ipa->interrupt);
 err_gsi_teardown:
-	gsi_teardown(&ipa->gsi);
+	if (ipa->version == IPA_VERSION_2_6L)
+		bam_teardown(&ipa->bam);
+	else
+		gsi_teardown(&ipa->gsi);
 
 	return ret;
 }
@@ -218,9 +236,15 @@ static void ipa_teardown(struct ipa *ipa)
 	ipa_endpoint_teardown(ipa);
 	(void)device_init_wakeup(&ipa->pdev->dev, false);
 	ipa_uc_teardown(ipa);
-	ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
+	if (ipa->version == IPA_VERSION_2_6L)
+		ipa_interrupt_remove(ipa->interrupt, IPA_V2_IRQ_TX_SUSPEND);
+	else
+		ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
 	ipa_interrupt_teardown(ipa->interrupt);
-	gsi_teardown(&ipa->gsi);
+	if (ipa->version == IPA_VERSION_2_6L)
+		bam_teardown(&ipa->bam);
+	else
+		gsi_teardown(&ipa->gsi);
 }
 
 /* Configure QMB Core Master Port selection */
@@ -232,7 +256,7 @@ static void ipa_hardware_config_comp(struct ipa *ipa)
 	if (ipa->version == IPA_VERSION_3_5_1)
 		return;
 
-	val = ioread32(ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
+	val = ioread32(ipa->reg_virt + ipa_reg_comp_cfg_offset(ipa->version));
 
 	if (ipa->version == IPA_VERSION_4_0) {
 		val &= ~IPA_QMB_SELECT_CONS_EN_FMASK;
@@ -247,7 +271,10 @@ static void ipa_hardware_config_comp(struct ipa *ipa)
 	val |= GSI_MULTI_INORDER_RD_DIS_FMASK;
 	val |= GSI_MULTI_INORDER_WR_DIS_FMASK;
 
-	iowrite32(val, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
+	if (ipa->version == IPA_VERSION_2_6L)
+		val = 1;
+
+	iowrite32(val, ipa->reg_virt + ipa_reg_comp_cfg_offset(ipa->version));
 }
 
 /* Configure DDR and PCIe max read/write QSB values */
@@ -276,6 +303,8 @@ static void ipa_hardware_config_qsb(struct ipa *ipa)
 
 	max1 = 12;
 	switch (version) {
+	case IPA_VERSION_2_6L: /* No QSB on IPA v2.6L */
+		break;
 	case IPA_VERSION_3_5_1:
 		max0 = 8;
 		break;
@@ -399,6 +428,18 @@ static void ipa_hardware_config(struct ipa *ipa)
 		iowrite32(val, ipa->reg_virt + ipa_reg_bcr_offset(ipa->version));
 	}
 
+	if (ipa->version == IPA_VERSION_2_6L) {
+		iowrite32(1, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
+		iowrite32(0, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
+
+		iowrite32(1, ipa->reg_virt + ipa_reg_comp_cfg_offset(ipa->version));
+
+		/* FIXME: writing to BCR twice is dumb */
+		val = ipa_reg_bcr_val(version);
+		iowrite32(val, ipa->reg_virt + ipa_reg_bcr_offset(ipa->version));
+		return;
+	}
+
 	/* Implement some hardware workarounds */
 	if (version != IPA_VERSION_3_5_1 && version < IPA_VERSION_4_5) {
 		/* Enable open global clocks (not needed for IPA v4.5) */
@@ -446,7 +487,8 @@ static void ipa_hardware_config(struct ipa *ipa)
 static void ipa_hardware_deconfig(struct ipa *ipa)
 {
 	/* Mostly we just leave things as we set them. */
-	ipa_hardware_dcd_deconfig(ipa);
+	if (ipa->version != IPA_VERSION_2_6L)
+		ipa_hardware_dcd_deconfig(ipa);
 }
 
 #ifdef IPA_VALIDATION
@@ -576,6 +618,9 @@ static int
 ipa_resource_config(struct ipa *ipa, const struct ipa_resource_data *data)
 {
 	u32 i;
+
+	if (ipa->version == IPA_VERSION_2_6L)
+		return 0;
 
 	if (!ipa_resource_limits_valid(ipa, data))
 		return -EINVAL;
@@ -870,8 +915,13 @@ static int ipa_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_reg_exit;
 
-	ret = gsi_init(&ipa->gsi, pdev, ipa->version, data->endpoint_count,
-		       data->endpoint_data);
+	if (ipa->version != IPA_VERSION_2_6L)
+		ret = gsi_init(&ipa->gsi, pdev, ipa->version, data->endpoint_count,
+				data->endpoint_data);
+	else
+		ret = bam_init(&ipa->bam, pdev, data->endpoint_count,
+				data->endpoint_data);
+
 	if (ret)
 		goto err_mem_exit;
 
@@ -887,7 +937,8 @@ static int ipa_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_endpoint_exit;
 
-	ret = ipa_modem_init(ipa, modem_init);
+	if (ipa->version != IPA_VERSION_2_6L)
+		ret = ipa_modem_init(ipa, modem_init);
 	if (ret)
 		goto err_table_exit;
 
@@ -906,8 +957,10 @@ static int ipa_probe(struct platform_device *pdev)
 
 	/* Otherwise we need to load the firmware and have Trust Zone validate
 	 * and install it.  If that succeeds we can proceed with setup.
+	 * But on IPA v2.6L we don't need to do firmware loading :D
 	 */
-	ret = ipa_firmware_load(dev);
+	if (ipa->version != IPA_VERSION_2_6L)
+		ret = ipa_firmware_load(dev);
 	if (ret)
 		goto err_deconfig;
 
@@ -926,7 +979,10 @@ err_table_exit:
 err_endpoint_exit:
 	ipa_endpoint_exit(ipa);
 err_gsi_exit:
-	gsi_exit(&ipa->gsi);
+	if (ipa->version == IPA_VERSION_2_6L)
+		bam_exit(&ipa->bam);
+	else
+		gsi_exit(&ipa->gsi);
 err_mem_exit:
 	ipa_mem_exit(ipa);
 err_reg_exit:
@@ -965,7 +1021,10 @@ static int ipa_remove(struct platform_device *pdev)
 	ipa_modem_exit(ipa);
 	ipa_table_exit(ipa);
 	ipa_endpoint_exit(ipa);
-	gsi_exit(&ipa->gsi);
+	if (ipa->version == IPA_VERSION_2_6L)
+		bam_exit(&ipa->bam);
+	else
+		gsi_exit(&ipa->gsi);
 	ipa_mem_exit(ipa);
 	ipa_reg_exit(ipa);
 	kfree(ipa);
