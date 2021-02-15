@@ -288,10 +288,9 @@ bool ipa_cmd_data_valid(struct ipa *ipa)
 
 #endif /* IPA_VALIDATE */
 
-int ipa_cmd_pool_init(struct gsi_channel *channel, u32 tre_max)
+int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
+		      u32 tre_max, u32 tlv_count)
 {
-	struct ipa_trans_info *trans_info = &channel->trans_info;
-	struct device *dev = channel->gsi->dev;
 	int ret;
 
 	/* This is as good a place as any to validate build constants */
@@ -303,14 +302,14 @@ int ipa_cmd_pool_init(struct gsi_channel *channel, u32 tre_max)
 	 */
 	ret = ipa_trans_pool_init_dma(dev, &trans_info->cmd_pool,
 				      sizeof(union ipa_cmd_payload),
-				      tre_max, channel->tlv_count);
+				      tre_max, tlv_count);
 	if (ret)
 		return ret;
 
 	/* Each TRE needs a command info structure */
 	ret = ipa_trans_pool_init(&trans_info->info_pool,
 				   sizeof(struct ipa_cmd_info),
-				   tre_max, channel->tlv_count);
+				   tre_max, tlv_count);
 	if (ret)
 		ipa_trans_pool_exit_dma(dev, &trans_info->cmd_pool);
 

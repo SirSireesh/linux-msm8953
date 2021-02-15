@@ -13,6 +13,7 @@
 #include <linux/dmaengine.h>
 
 #include "gsi_trans.h"
+#include "bam_trans.h"
 
 struct scatterlist;
 
@@ -21,6 +22,7 @@ struct scatterlist;
  *
  * Most fields in this structure for internal use by the transaction core code:
  * @links:	Links for channel transaction lists by state
+ * @bam:	SPS pointer
  * @gsi:	GSI pointer
  * @channel_id: Channel number transaction is associated with
  * @cancelled:	If set by the core code, transaction was cancelled
@@ -40,8 +42,9 @@ struct scatterlist;
  * the full structure size is no larger than 128 bytes.
  */
 struct ipa_trans {
-	struct list_head links;		/* (gsi/sps)_channel lists */
+	struct list_head links;		/* (gsi/bam)_channel lists */
 
+	struct bam *bam;
 	struct gsi *gsi;
 
 	u8 channel_id;

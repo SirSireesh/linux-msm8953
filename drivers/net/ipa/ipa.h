@@ -13,6 +13,7 @@
 
 #include "ipa_version.h"
 #include "gsi.h"
+#include "bam.h"
 #include "ipa_mem.h"
 #include "ipa_qmi.h"
 #include "ipa_endpoint.h"
@@ -80,6 +81,7 @@ enum ipa_flag {
  */
 struct ipa {
 	struct gsi gsi;
+	struct bam bam;
 	DECLARE_BITMAP(flags, IPA_FLAG_COUNT);
 	enum ipa_version version;
 	struct platform_device *pdev;

@@ -91,12 +91,15 @@ static inline bool ipa_cmd_data_valid(struct ipa *ipa)
 
 /**
  * ipa_cmd_pool_init() - initialize command channel pools
- * @channel:	AP->IPA command TX GSI channel pointer
- * @tre_count:	Number of pool elements to allocate
+ * @dev:	DMA device struct
+ * @trans_info:	Channel transaction info
+ * @tre_max:	Number of pool elements to allocate
+ * @tlv_count:	The TLV count on the channel
  *
  * Return:	0 if successful, or a negative error code
  */
-int ipa_cmd_pool_init(struct gsi_channel *gsi_channel, u32 tre_count);
+int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
+		      u32 tre_max, u32 tlv_count);
 
 /**
  * ipa_cmd_pool_exit() - Inverse of ipa_cmd_pool_init()

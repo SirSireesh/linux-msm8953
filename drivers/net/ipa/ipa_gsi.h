@@ -9,7 +9,7 @@
 #include <linux/types.h>
 
 struct gsi;
-struct sps;
+struct bam;
 struct ipa_trans;
 struct ipa_gsi_endpoint_data;
 
@@ -44,7 +44,7 @@ void ipa_gsi_trans_release(struct ipa_trans *trans);
  */
 void ipa_gsi_channel_tx_queued(struct gsi *gsi, u32 channel_id, u32 count,
 			       u32 byte_count);
-void ipa_sps_channel_tx_queued(struct sps *sps, u32 channel_id, u32 count,
+void ipa_bam_channel_tx_queued(struct bam *bam, u32 channel_id, u32 count,
 			       u32 byte_count);
 
 /**
@@ -59,7 +59,7 @@ void ipa_sps_channel_tx_queued(struct sps *sps, u32 channel_id, u32 count,
  */
 void ipa_gsi_channel_tx_completed(struct gsi *gsi, u32 channel_id, u32 count,
 				  u32 byte_count);
-void ipa_sps_channel_tx_completed(struct sps *gsi, u32 channel_id, u32 count,
+void ipa_bam_channel_tx_completed(struct bam *gsi, u32 channel_id, u32 count,
 				  u32 byte_count);
 
 /* ipa_gsi_endpoint_data_empty() - Empty endpoint config data test

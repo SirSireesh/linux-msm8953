@@ -116,6 +116,7 @@ struct ipa_endpoint_rx_data {
  * @status_enable:	whether endpoint uses status elements
  * @dma_mode:		whether endpoint operates in DMA mode
  * @dma_endpoint:	peer endpoint, if operating in DMA mode
+ * @skip_config:	whether endpoint should be left untouched
  * @tx:			TX-specific endpoint information (see above)
  * @rx:			RX-specific endpoint information (see above)
  */
@@ -126,6 +127,7 @@ struct ipa_endpoint_config_data {
 	bool aggregation;
 	bool status_enable;
 	bool dma_mode;
+	bool skip_config;
 	enum ipa_endpoint_name dma_endpoint;
 	union {
 		struct ipa_endpoint_tx_data tx;
@@ -171,6 +173,7 @@ struct ipa_gsi_endpoint_data {
 	u8 channel_id;
 	u8 endpoint_id;
 	bool toward_ipa;
+	char *channel_name;	/* used only for BAM DMA channels */
 
 	struct gsi_channel_data channel;
 	struct ipa_endpoint_data endpoint;

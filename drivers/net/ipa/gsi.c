@@ -2008,7 +2008,8 @@ static int gsi_channel_init_one(struct gsi *gsi,
 	if (command) {
 		u32 tre_max = gsi_channel_tre_max(gsi, data->channel_id);
 
-		ret = ipa_cmd_pool_init(channel, tre_max);
+		ret = ipa_cmd_pool_init(gsi->dev, &channel->trans_info,
+					tre_max, channel->tlv_count);
 	}
 	if (!ret)
 		return 0;	/* Success! */
