@@ -128,8 +128,11 @@ static void ipa_qmi_ready(struct ipa_qmi *ipa_qmi)
 	struct ipa *ipa = container_of(ipa_qmi, struct ipa, qmi);
 	int ret;
 
+	bool uc_ready = (ipa->version > IPA_VERSION_2_6L) ?
+		ipa_qmi->uc_ready : ipa->uc_loaded;
+
 	/* We aren't ready until the modem and microcontroller are */
-	if (!ipa_qmi->modem_ready || !ipa_qmi->uc_ready)
+	if (!ipa_qmi->modem_ready || !uc_ready)
 		return;
 
 	/* Send the indication message if it was requested */
@@ -306,12 +309,18 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 	mem = &ipa->mem[IPA_MEM_V4_ROUTE];
 	req.v4_route_tbl_info_valid = 1;
 	req.v4_route_tbl_info.start = ipa->mem_offset + mem->offset;
-	req.v4_route_tbl_info.count = mem->size / IPA_V3_TABLE_ENTRY_SIZE;
+	if (ipa->version == IPA_VERSION_2_6L)
+		req.v4_route_tbl_info.count = mem->size / IPA_V2_TABLE_ENTRY_SIZE;
+	else
+		req.v4_route_tbl_info.count = mem->size / IPA_V3_TABLE_ENTRY_SIZE;
 
 	mem = &ipa->mem[IPA_MEM_V6_ROUTE];
 	req.v6_route_tbl_info_valid = 1;
 	req.v6_route_tbl_info.start = ipa->mem_offset + mem->offset;
-	req.v6_route_tbl_info.count = mem->size / IPA_V3_TABLE_ENTRY_SIZE;
+	if (ipa->version == IPA_VERSION_2_6L)
+		req.v6_route_tbl_info.count = mem->size / IPA_V2_TABLE_ENTRY_SIZE;
+	else
+		req.v6_route_tbl_info.count = mem->size / IPA_V3_TABLE_ENTRY_SIZE;
 
 	mem = &ipa->mem[IPA_MEM_V4_FILTER];
 	req.v4_filter_tbl_start_valid = 1;
@@ -343,7 +352,12 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 			req.hdr_proc_ctx_tbl_info.start + mem->size - 1;
 	}
 
-	/* Nothing to report for the compression table (zip_tbl_info) */
+	mem = &ipa->mem[IPA_MEM_ZIP];
+	if (mem->size) {
+		req.zip_tbl_info_valid = 1;
+		req.zip_tbl_info.start = ipa->mem_offset + mem->offset;
+		req.zip_tbl_info.end = ipa->mem_offset + mem->size - 1;
+	}
 
 	mem = &ipa->mem[IPA_MEM_V4_ROUTE_HASHED];
 	if (mem->size) {
@@ -351,7 +365,7 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 		req.v4_hash_route_tbl_info.start =
 				ipa->mem_offset + mem->offset;
 		req.v4_hash_route_tbl_info.count =
-				mem->size / IPA_V3_TABLE_ENTRY_SIZE;
+				IPA_ROUTE_COUNT_MAX;
 	}
 
 	mem = &ipa->mem[IPA_MEM_V6_ROUTE_HASHED];
@@ -360,19 +374,19 @@ init_modem_driver_req(struct ipa_qmi *ipa_qmi)
 		req.v6_hash_route_tbl_info.start =
 			ipa->mem_offset + mem->offset;
 		req.v6_hash_route_tbl_info.count =
-			mem->size / IPA_V3_TABLE_ENTRY_SIZE;
+			IPA_ROUTE_COUNT_MAX;
 	}
 
 	mem = &ipa->mem[IPA_MEM_V4_FILTER_HASHED];
 	if (mem->size) {
 		req.v4_hash_filter_tbl_start_valid = 1;
-		req.v4_hash_filter_tbl_start = ipa->mem_offset + mem->offset;
+		req.v4_hash_filter_tbl_start = ipa->mem_offset + mem->offset;;
 	}
 
 	mem = &ipa->mem[IPA_MEM_V6_FILTER_HASHED];
 	if (mem->size) {
 		req.v6_hash_filter_tbl_start_valid = 1;
-		req.v6_hash_filter_tbl_start = ipa->mem_offset + mem->offset;
+		req.v6_hash_filter_tbl_start = ipa->mem_offset + mem->offset;;
 	}
 
 	/* None of the stats fields are valid (IPA v4.0 and above) */
