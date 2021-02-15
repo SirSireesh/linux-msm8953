@@ -18,6 +18,7 @@ struct sk_buff;
 
 struct ipa;
 struct ipa_gsi_endpoint_data;
+struct ipa_bam_endpoint_data;
 
 /* Non-zero granularity of counter used to implement aggregation timeout */
 #define IPA_AGGR_GRANULARITY		500	/* microseconds */
@@ -38,6 +39,7 @@ enum ipa_endpoint_name {
 };
 
 #define IPA_ENDPOINT_MAX		32	/* Max supported by driver */
+#define IPA_V2_RX_QUEUE_SIZE		193	/* The size supported by the hardware */
 
 /**
  * struct ipa_endpoint - IPA endpoint information
