@@ -170,7 +170,8 @@ void ipa_interrupt_suspend_clear_all(struct ipa_interrupt *interrupt)
 	u32 val;
 
 	val = ioread32(ipa->reg_virt + ipa_reg_irq_suspend_info_offset(ipa->version));
-	iowrite32(val, ipa->reg_virt + IPA_REG_IRQ_SUSPEND_CLR_OFFSET);
+	if (ipa->version != IPA_VERSION_2_6L)
+		iowrite32(val, ipa->reg_virt + IPA_REG_IRQ_SUSPEND_CLR_OFFSET);
 }
 
 /* Simulate arrival of an IPA TX_SUSPEND interrupt */

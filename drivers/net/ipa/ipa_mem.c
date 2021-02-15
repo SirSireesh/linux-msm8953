@@ -30,8 +30,15 @@
 static void
 ipa_mem_zero_region_add(struct ipa_trans *trans, const struct ipa_mem *mem)
 {
-	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
-	dma_addr_t addr = ipa->zero_addr;
+	struct ipa *ipa;
+	dma_addr_t addr;
+
+	if (trans->gsi)
+		ipa = container_of(trans->gsi, struct ipa, gsi);
+	else
+		ipa = container_of(trans->bam, struct ipa, bam);
+
+	addr = ipa->zero_addr;
 
 	if (!mem->size)
 		return;
@@ -65,33 +72,63 @@ int ipa_mem_setup(struct ipa *ipa)
 	/* Get a transaction to define the header memory region and to zero
 	 * the processing context and modem memory regions.
 	 */
-	trans = ipa_cmd_trans_alloc(ipa, 4);
-	if (!trans) {
-		dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
-		return -EBUSY;
+	if (ipa->version == IPA_VERSION_2_6L) {
+		/* On IPA v2.6L there is no PROC_CTX, so we only zero the
+		 * modem header memory. There is no AP_HEADER either, but since we
+		 * only care about its size, and not region, its fine.
+		 */
+		trans = ipa_cmd_trans_alloc(ipa, 4);
+		if (!trans) {
+			dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
+			return -EBUSY;
+		}
+
+		/* Initialize IPA-local header memory.  The modem and AP header
+		 * regions are contiguous, and initialized together.
+		 */
+		offset = ipa->mem[IPA_MEM_MODEM_HEADER].offset;
+		size = ipa->mem[IPA_MEM_MODEM_HEADER].size;
+		size += ipa->mem[IPA_MEM_AP_HEADER].size;
+
+		ipa_cmd_hdr_init_local_add(trans, offset, size, addr);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_HEADER]);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_ZIP]);
+
+		ipa_trans_commit_wait(trans);
+
+	} else {
+		trans = ipa_cmd_trans_alloc(ipa, 4);
+		if (!trans) {
+			dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
+			return -EBUSY;
+		}
+
+		/* Initialize IPA-local header memory.  The modem and AP header
+		 * regions are contiguous, and initialized together.
+		 */
+		offset = ipa->mem[IPA_MEM_MODEM_HEADER].offset;
+		size = ipa->mem[IPA_MEM_MODEM_HEADER].size;
+		size += ipa->mem[IPA_MEM_AP_HEADER].size;
+
+		ipa_cmd_hdr_init_local_add(trans, offset, size, addr);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_PROC_CTX]);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_AP_PROC_CTX]);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
+
+		ipa_trans_commit_wait(trans);
+
+		/* Tell the hardware where the processing context area is located */
+		iowrite32(ipa->mem_offset + offset, ipa->reg_virt +
+			  ipa_reg_local_pkt_proc_cntxt_base_offset(ipa->version));
+
 	}
-
-	/* Initialize IPA-local header memory.  The modem and AP header
-	 * regions are contiguous, and initialized together.
-	 */
-	offset = ipa->mem[IPA_MEM_MODEM_HEADER].offset;
-	size = ipa->mem[IPA_MEM_MODEM_HEADER].size;
-	size += ipa->mem[IPA_MEM_AP_HEADER].size;
-
-	ipa_cmd_hdr_init_local_add(trans, offset, size, addr);
-
-	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_PROC_CTX]);
-
-	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_AP_PROC_CTX]);
-
-	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
-
-	ipa_trans_commit_wait(trans);
-
-	/* Tell the hardware where the processing context area is located */
-	iowrite32(ipa->mem_offset + ipa->mem[IPA_MEM_MODEM_PROC_CTX].offset,
-		  ipa->reg_virt + IPA_REG_LOCAL_PKT_PROC_CNTXT_BASE_OFFSET);
-
 	return 0;
 }
 
@@ -154,10 +191,15 @@ int ipa_mem_config(struct ipa *ipa)
 	/* Check the advertised location and size of the shared memory area */
 	val = ioread32(ipa->reg_virt + ipa_reg_shared_mem_size_offset(ipa->version));
 
-	/* The fields in the register are in 8 byte units */
-	ipa->mem_offset = 8 * u32_get_bits(val, SHARED_MEM_BADDR_FMASK);
-	/* Make sure the end is within the region's mapped space */
-	mem_size = 8 * u32_get_bits(val, SHARED_MEM_SIZE_FMASK);
+	if (ipa->version != IPA_VERSION_2_6L) {
+		/* The fields in the register are in 8 byte units */
+		ipa->mem_offset = 8 * u32_get_bits(val, SHARED_MEM_BADDR_FMASK);
+		/* Make sure the end is within the region's mapped space */
+		mem_size = 8 * u32_get_bits(val, SHARED_MEM_SIZE_FMASK);
+	} else {
+		ipa->mem_offset = u32_get_bits(val, SHARED_MEM_BADDR_FMASK);
+		mem_size = u32_get_bits(val, SHARED_MEM_SIZE_FMASK);
+	}
 
 	/* If the sizes don't match, issue a warning */
 	if (ipa->mem_offset + mem_size < ipa->mem_size) {
@@ -252,23 +294,37 @@ int ipa_mem_zero_modem(struct ipa *ipa)
 {
 	struct ipa_trans *trans;
 
-	/* Get a transaction to zero the modem memory, modem header,
-	 * and modem processing context regions.
-	 */
-	trans = ipa_cmd_trans_alloc(ipa, 3);
-	if (!trans) {
-		dev_err(&ipa->pdev->dev,
-			"no transaction to zero modem memory\n");
-		return -EBUSY;
+	if (ipa->version == IPA_VERSION_2_6L) {
+		/* IPA v2.6L only needs the header region zeroed */
+		trans = ipa_cmd_trans_alloc(ipa, 1);
+		if (!trans) {
+			dev_err(&ipa->pdev->dev,
+					"no transaction to zero modem memory\n");
+			return -EBUSY;
+		}
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_HEADER]);
+
+		ipa_trans_commit_wait(trans);
+	} else {
+		/* Get a transaction to zero the modem memory, modem header,
+		 * and modem processing context regions.
+		 */
+		trans = ipa_cmd_trans_alloc(ipa, 3);
+		if (!trans) {
+			dev_err(&ipa->pdev->dev,
+					"no transaction to zero modem memory\n");
+			return -EBUSY;
+		}
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_HEADER]);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_PROC_CTX]);
+
+		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
+
+		ipa_trans_commit_wait(trans);
 	}
-
-	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_HEADER]);
-
-	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_PROC_CTX]);
-
-	ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
-
-	ipa_trans_commit_wait(trans);
 
 	return 0;
 }
@@ -297,7 +353,7 @@ static int ipa_imem_init(struct ipa *ipa, unsigned long addr, size_t size)
 	phys_addr_t phys;
 	int ret;
 
-	if (!size)
+	if (!size || ipa->version == IPA_VERSION_2_6L)
 		return 0;	/* IMEM memory not used */
 
 	domain = iommu_get_domain_for_dev(dev);
@@ -407,6 +463,10 @@ static int ipa_smem_init(struct ipa *ipa, u32 item, size_t size)
 		return -EINVAL;
 	}
 
+	/* IPA v2.6L does not use IOMMU */
+	if (ipa->version == IPA_VERSION_2_6L)
+		return 0;
+
 	domain = iommu_get_domain_for_dev(dev);
 	if (!domain) {
 		dev_err(dev, "no IOMMU domain found for SMEM\n");
@@ -433,6 +493,9 @@ static void ipa_smem_exit(struct ipa *ipa)
 {
 	struct device *dev = &ipa->pdev->dev;
 	struct iommu_domain *domain;
+
+	if (ipa->version == IPA_VERSION_2_6L)
+		return;
 
 	domain = iommu_get_domain_for_dev(dev);
 	if (domain) {
@@ -464,7 +527,15 @@ int ipa_mem_init(struct ipa *ipa, const struct ipa_mem_data *mem_data)
 		return -EINVAL;
 	}
 
-	ret = dma_set_mask_and_coherent(&ipa->pdev->dev, DMA_BIT_MASK(64));
+	/* The ipa->mem[] array is indexed by enum ipa_mem_id values */
+	ipa->mem = mem_data->local;
+
+	/* IPA v2.6L doesn't use the IOMMU for ipa-shared memory
+	 * IPA v2.6L is also 32 bit */
+	if (ipa->version == IPA_VERSION_2_6L)
+		ret = dma_set_mask_and_coherent(&ipa->pdev->dev, DMA_BIT_MASK(32));
+	else
+		ret = dma_set_mask_and_coherent(&ipa->pdev->dev, DMA_BIT_MASK(64));
 	if (ret) {
 		dev_err(dev, "error %d setting DMA mask\n", ret);
 		return ret;
@@ -478,7 +549,8 @@ int ipa_mem_init(struct ipa *ipa, const struct ipa_mem_data *mem_data)
 		return -ENODEV;
 	}
 
-	ipa->mem_virt = memremap(res->start, resource_size(res), MEMREMAP_WC);
+	ipa->mem_virt = memremap(res->start, resource_size(res),
+			MEMREMAP_WC);
 	if (!ipa->mem_virt) {
 		dev_err(dev, "unable to remap \"ipa-shared\" memory\n");
 		return -ENOMEM;
@@ -486,9 +558,6 @@ int ipa_mem_init(struct ipa *ipa, const struct ipa_mem_data *mem_data)
 
 	ipa->mem_addr = res->start;
 	ipa->mem_size = resource_size(res);
-
-	/* The ipa->mem[] array is indexed by enum ipa_mem_id values */
-	ipa->mem = mem_data->local;
 
 	ret = ipa_imem_init(ipa, mem_data->imem_addr, mem_data->imem_size);
 	if (ret)

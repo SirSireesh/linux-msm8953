@@ -62,6 +62,7 @@ enum ipa_mem_id {
 	IPA_MEM_STATS_DROP,		/* 0 canaries (IPA v4.0 and above) */
 	IPA_MEM_MODEM,			/* 0 canaries */
 	IPA_MEM_UC_EVENT_RING,		/* 1 canary */
+	IPA_MEM_ZIP,			/* 1 canary (IPA v2.6L) */
 	IPA_MEM_COUNT,			/* Number of regions (not an index) */
 };
 
