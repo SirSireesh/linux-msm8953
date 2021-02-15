@@ -255,7 +255,8 @@ int ipa_modem_stop(struct ipa *ipa)
 		return -EBUSY;
 
 	/* Prevent the modem from triggering a call to ipa_setup() */
-	ipa_smp2p_disable(ipa);
+	if (ipa->version != IPA_VERSION_2_6L)
+		ipa_smp2p_disable(ipa);
 
 	if (netdev) {
 		/* Stop the queue and disable the endpoints if it's open */

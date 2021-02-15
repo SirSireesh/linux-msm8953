@@ -287,6 +287,9 @@ void ipa_smp2p_exit(struct ipa *ipa)
 {
 	struct ipa_smp2p *smp2p = ipa->smp2p;
 
+	if (!smp2p)
+		return;
+
 	if (smp2p->setup_ready_irq)
 		ipa_smp2p_irq_exit(smp2p, smp2p->setup_ready_irq);
 	ipa_smp2p_panic_notifier_unregister(smp2p);
@@ -318,7 +321,8 @@ void ipa_smp2p_notify_reset(struct ipa *ipa)
 	struct ipa_smp2p *smp2p = ipa->smp2p;
 	u32 mask;
 
-	if (!smp2p->notified)
+	/* IPA v2.6L does not use SMP2P between modem and IPA */
+	if (ipa->version == IPA_VERSION_2_6L || !smp2p->notified)
 		return;
 
 	ipa_smp2p_clock_release(ipa);
