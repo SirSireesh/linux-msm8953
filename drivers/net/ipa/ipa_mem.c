@@ -564,8 +564,10 @@ int ipa_mem_init(struct ipa *ipa, const struct ipa_mem_data *mem_data)
 		goto err_unmap;
 
 	ret = ipa_smem_init(ipa, mem_data->smem_id, mem_data->smem_size);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "failed to init SMEM region: %d\n", ret);
 		goto err_imem_exit;
+	}
 
 	return 0;
 
