@@ -761,7 +761,7 @@ int ipa_v2_table_init(struct ipa *ipa)
 	__le32 *virt;
 	size_t size;
 
-	ipa_table_validate_build();
+	/* TODO: ipa_table_validate_build(); */
 
 	size = IPA_V2_ZERO_RULE_SIZE + (1 + count) * IPA_V2_TABLE_ENTRY_SIZE;
 	virt = dma_alloc_coherent(dev, size, &addr, GFP_KERNEL);
@@ -835,7 +835,20 @@ int ipa_table_init(struct ipa *ipa)
 		return ipa_v3_table_init(ipa);
 }
 
-void ipa_table_exit(struct ipa *ipa)
+void ipa_v2_table_exit(struct ipa *ipa)
+{
+	u32 count = max_t(u32, 1 + IPA_FILTER_COUNT_MAX, IPA_ROUTE_COUNT_MAX);
+	struct device *dev = &ipa->pdev->dev;
+	size_t size;
+
+	size = IPA_V2_ZERO_RULE_SIZE + (1 + count) * IPA_V2_TABLE_ENTRY_SIZE;
+
+	dma_free_coherent(dev, size, ipa->table_virt, ipa->table_addr);
+	ipa->table_addr = 0;
+	ipa->table_virt = NULL;
+}
+
+void ipa_v3_table_exit(struct ipa *ipa)
 {
 	u32 count = max_t(u32, 1 + IPA_FILTER_COUNT_MAX, IPA_ROUTE_COUNT_MAX);
 	struct device *dev = &ipa->pdev->dev;
@@ -846,4 +859,12 @@ void ipa_table_exit(struct ipa *ipa)
 	dma_free_coherent(dev, size, ipa->table_virt, ipa->table_addr);
 	ipa->table_addr = 0;
 	ipa->table_virt = NULL;
+}
+
+void ipa_table_exit(struct ipa *ipa)
+{
+	if (ipa->version == IPA_VERSION_2_6L)
+		ipa_v2_table_exit(ipa);
+	else
+		ipa_v3_table_exit(ipa);
 }
