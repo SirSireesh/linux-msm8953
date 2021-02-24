@@ -28,6 +28,8 @@ struct ipa_clock;
 struct ipa_smp2p;
 struct ipa_interrupt;
 
+struct ipa_cmd_ops;
+
 /**
  * enum ipa_flag - IPA state flags
  * @IPA_FLAG_RESUMED:	Whether resume from suspend has been signaled
@@ -80,8 +82,10 @@ enum ipa_flag {
  * @qmi:		QMI information
  */
 struct ipa {
-	struct gsi gsi;
-	struct bam bam;
+	union {
+		struct gsi gsi;
+		struct bam bam;
+	};
 	DECLARE_BITMAP(flags, IPA_FLAG_COUNT);
 	enum ipa_version version;
 	struct platform_device *pdev;
@@ -132,6 +136,8 @@ struct ipa {
 	atomic_t modem_state;		/* enum ipa_modem_state */
 	struct net_device *modem_netdev;
 	struct ipa_qmi qmi;
+
+	const struct ipa_cmd_ops *cmd_ops;
 };
 
 /**

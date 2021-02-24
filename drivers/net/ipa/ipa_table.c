@@ -280,7 +280,7 @@ static void ipa_v2_table_reset_add(struct ipa_trans *trans, bool filter,
 	size = count * IPA_V2_TABLE_ENTRY_SIZE;
 	addr = ipa_table_addr(ipa, false, count);
 
-	ipa_cmd_dma_shared_mem_add(trans, offset, size, addr, true);
+	ipa->cmd_ops->dma_shared_mem_add(trans, offset, size, addr, true);
 }
 
 static void ipa_v3_table_reset_add(struct ipa_trans *trans, bool filter,
@@ -302,7 +302,7 @@ static void ipa_v3_table_reset_add(struct ipa_trans *trans, bool filter,
 	size = count * IPA_V3_TABLE_ENTRY_SIZE;
 	addr = ipa_table_addr(ipa, false, count);
 
-	ipa_cmd_dma_shared_mem_add(trans, offset, size, addr, true);
+	ipa->cmd_ops->dma_shared_mem_add(trans, offset, size, addr, true);
 }
 
 static void ipa_table_reset_add(struct ipa_trans *trans, bool filter,
@@ -329,7 +329,7 @@ ipa_filter_reset_table(struct ipa *ipa, const struct ipa_mem *mem, bool modem)
 	if (!mem->size)
 		return 0;
 
-	trans = ipa_cmd_trans_alloc(ipa, count);
+	trans = ipa->cmd_ops->trans_alloc(ipa, count);
 	if (!trans) {
 		dev_err(&ipa->pdev->dev,
 			"no transaction for %s filter reset\n",
@@ -393,7 +393,7 @@ static int ipa_route_reset(struct ipa *ipa, bool modem)
 	u16 first;
 	u16 count;
 
-	trans = ipa_cmd_trans_alloc(ipa, 4);
+	trans = ipa->cmd_ops->trans_alloc(ipa, 4);
 	if (!trans) {
 		dev_err(&ipa->pdev->dev,
 			"no transaction for %s route reset\n",
@@ -454,7 +454,7 @@ int ipa_table_hash_flush(struct ipa *ipa)
 	if (ipa->version == IPA_VERSION_4_2 || ipa->version == IPA_VERSION_2_6L)
 		return 0;
 
-	trans = ipa_cmd_trans_alloc(ipa, 1);
+	trans = ipa->cmd_ops->trans_alloc(ipa, 1);
 	if (!trans) {
 		dev_err(&ipa->pdev->dev, "no transaction for hash flush\n");
 		return -EBUSY;
@@ -463,7 +463,7 @@ int ipa_table_hash_flush(struct ipa *ipa)
 	val = IPV4_FILTER_HASH_FMASK | IPV6_FILTER_HASH_FMASK;
 	val |= IPV6_ROUTER_HASH_FMASK | IPV4_ROUTER_HASH_FMASK;
 
-	ipa_cmd_register_write_add(trans, offset, val, val, false);
+	ipa->cmd_ops->register_write_add(trans, offset, val, val, false);
 
 	ipa_trans_commit_wait(trans);
 
@@ -491,7 +491,8 @@ static void ipa_v2_table_init_add(struct ipa_trans *trans, bool filter,
 	size = count * IPA_V2_TABLE_ENTRY_SIZE;
 	addr = ipa_table_addr(ipa, filter, count);
 
-	ipa_v2_cmd_table_init_add(trans, opcode, size, mem->offset, addr, ipv4);
+	ipa->cmd_ops->table_init_add(trans, opcode, size, mem->offset, addr,
+				     0, 0, 0, ipv4);
 }
 
 static void ipa_v3_table_init_add(struct ipa_trans *trans, bool filter,
@@ -525,14 +526,14 @@ static void ipa_v3_table_init_add(struct ipa_trans *trans, bool filter,
 	addr = ipa_table_addr(ipa, filter, count);
 	hash_addr = ipa_table_addr(ipa, filter, hash_count);
 
-	ipa_v3_cmd_table_init_add(trans, opcode, size, mem->offset, addr,
-			       hash_size, hash_mem->offset, hash_addr);
+	ipa->cmd_ops->table_init_add(trans, opcode, size, mem->offset, addr,
+				     hash_size, hash_mem->offset, hash_addr, false);
 }
 
 int ipa_v2_table_setup(struct ipa *ipa)
 {
 	struct ipa_trans *trans;
-	trans = ipa_cmd_trans_alloc(ipa, 4);
+	trans = ipa->cmd_ops->trans_alloc(ipa, 4);
 	if (!trans) {
 		dev_err(&ipa->pdev->dev, "no transaction for table setup\n");
 		return -EBUSY;
@@ -559,7 +560,7 @@ int ipa_v3_table_setup(struct ipa *ipa)
 {
 	struct ipa_trans *trans;
 
-	trans = ipa_cmd_trans_alloc(ipa, 4);
+	trans = ipa->cmd_ops->trans_alloc(ipa, 4);
 	if (!trans) {
 		dev_err(&ipa->pdev->dev, "no transaction for table setup\n");
 		return -EBUSY;

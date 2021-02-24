@@ -84,7 +84,10 @@ err_dma_chan_free:
 static void bam_channel_exit_one(struct bam_channel* channel)
 {
 	if (!channel->chan)
-		return;
+		return;		/* Ignore uninitialized channels */
+
+	if (channel->command)
+		ipa_v2_cmd_pool_exit(channel);
 	dmaengine_terminate_sync(channel->chan);
 	dma_release_channel(channel->chan);
 }
