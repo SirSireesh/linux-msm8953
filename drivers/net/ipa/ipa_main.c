@@ -30,8 +30,8 @@
 #include "ipa_modem.h"
 #include "ipa_uc.h"
 #include "ipa_interrupt.h"
-#include "gsi_trans.h"
-#include "bam_trans.h"
+#include "gsi.h"
+#include "bam.h"
 
 /**
  * DOC: The IP Accelerator
@@ -123,11 +123,7 @@ int ipa_setup(struct ipa *ipa)
 	struct device *dev = &ipa->pdev->dev;
 	int ret;
 
-	if (ipa->version == IPA_VERSION_2_6L)
-		ret = bam_setup(&ipa->bam);
-	else
-		ret = gsi_setup(&ipa->gsi);
-
+	ret = ipa_transport_setup(ipa->transport);
 	if (ret)
 		return ret;
 
@@ -208,10 +204,7 @@ err_uc_teardown:
 		ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
 	ipa_interrupt_teardown(ipa->interrupt);
 err_gsi_teardown:
-	if (ipa->version == IPA_VERSION_2_6L)
-		bam_teardown(&ipa->bam);
-	else
-		gsi_teardown(&ipa->gsi);
+	ipa_transport_teardown(ipa->transport);
 
 	return ret;
 }
@@ -241,10 +234,7 @@ static void ipa_teardown(struct ipa *ipa)
 	else
 		ipa_interrupt_remove(ipa->interrupt, IPA_IRQ_TX_SUSPEND);
 	ipa_interrupt_teardown(ipa->interrupt);
-	if (ipa->version == IPA_VERSION_2_6L)
-		bam_teardown(&ipa->bam);
-	else
-		gsi_teardown(&ipa->gsi);
+	ipa_transport_teardown(ipa->transport);
 }
 
 /* Configure QMB Core Master Port selection */
@@ -422,23 +412,21 @@ static void ipa_hardware_config(struct ipa *ipa)
 	u32 granularity;
 	u32 val;
 
+	if (ipa->version == IPA_VERSION_2_6L) {
+		iowrite32(1, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
+		iowrite32(0, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
+
+		iowrite32(1, ipa->reg_virt + ipa_reg_comp_cfg_offset(ipa->version));
+	}
+
 	/* IPA v4.5 has no backward compatibility register */
 	if (version < IPA_VERSION_4_5) {
 		val = ipa_reg_bcr_val(version);
 		iowrite32(val, ipa->reg_virt + ipa_reg_bcr_offset(ipa->version));
 	}
 
-	if (ipa->version == IPA_VERSION_2_6L) {
-		iowrite32(1, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
-		iowrite32(0, ipa->reg_virt + IPA_REG_COMP_CFG_OFFSET);
-
-		iowrite32(1, ipa->reg_virt + ipa_reg_comp_cfg_offset(ipa->version));
-
-		/* FIXME: writing to BCR twice is dumb */
-		val = ipa_reg_bcr_val(version);
-		iowrite32(val, ipa->reg_virt + ipa_reg_bcr_offset(ipa->version));
+	if (ipa->version <= IPA_VERSION_2_6L)
 		return;
-	}
 
 	/* Implement some hardware workarounds */
 	if (version != IPA_VERSION_3_5_1 && version < IPA_VERSION_4_5) {
@@ -919,15 +907,18 @@ static int ipa_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_reg_exit;
 
-	if (ipa->version != IPA_VERSION_2_6L)
-		ret = gsi_init(&ipa->gsi, pdev, ipa->version, data->endpoint_count,
+	if (ipa->version <= IPA_VERSION_2_6L) 
+		ipa->transport = bam_transport_init(pdev, ipa, data->endpoint_count,
 				data->endpoint_data);
 	else
-		ret = bam_init(&ipa->bam, pdev, data->endpoint_count,
+		ipa->transport = gsi_transport_init(pdev, ipa, data->endpoint_count,
 				data->endpoint_data);
+	ipa->transport->ipa = ipa;
 
-	if (ret)
+	if (IS_ERR_OR_NULL(ipa->transport)) {
+		ret = PTR_ERR(ipa->transport) ?: -EINVAL;
 		goto err_mem_exit;
+	}
 
 	/* Result is a non-zero mask of endpoints that support filtering */
 	ipa->filter_map = ipa_endpoint_init(ipa, data->endpoint_count,
@@ -983,10 +974,7 @@ err_table_exit:
 err_endpoint_exit:
 	ipa_endpoint_exit(ipa);
 err_gsi_exit:
-	if (ipa->version == IPA_VERSION_2_6L)
-		bam_exit(&ipa->bam);
-	else
-		gsi_exit(&ipa->gsi);
+	ipa_transport_exit(ipa->transport);
 err_mem_exit:
 	ipa_mem_exit(ipa);
 err_reg_exit:
@@ -1025,10 +1013,7 @@ static int ipa_remove(struct platform_device *pdev)
 	ipa_modem_exit(ipa);
 	ipa_table_exit(ipa);
 	ipa_endpoint_exit(ipa);
-	if (ipa->version == IPA_VERSION_2_6L)
-		bam_exit(&ipa->bam);
-	else
-		gsi_exit(&ipa->gsi);
+	ipa_transport_exit(ipa->transport);
 	ipa_mem_exit(ipa);
 	ipa_reg_exit(ipa);
 	kfree(ipa);

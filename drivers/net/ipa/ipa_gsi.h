@@ -8,10 +8,9 @@
 
 #include <linux/types.h>
 
-struct gsi;
-struct bam;
 struct ipa_trans;
 struct ipa_gsi_endpoint_data;
+struct ipa_transport;
 
 /**
  * ipa_gsi_trans_complete() - GSI transaction completion callback
@@ -42,10 +41,8 @@ void ipa_gsi_trans_release(struct ipa_trans *trans);
  * This called from the GSI layer to notify the IPA layer that some
  * number of transactions have been queued to hardware for execution.
  */
-void ipa_gsi_channel_tx_queued(struct gsi *gsi, u32 channel_id, u32 count,
-			       u32 byte_count);
-void ipa_bam_channel_tx_queued(struct bam *bam, u32 channel_id, u32 count,
-			       u32 byte_count);
+void ipa_transport_channel_tx_queued(struct ipa_transport *transport,
+				     u32 channel_id, u32 count, u32 byte_count);
 
 /**
  * ipa_gsi_channel_tx_completed() - GSI transaction completion callback
@@ -57,10 +54,8 @@ void ipa_bam_channel_tx_queued(struct bam *bam, u32 channel_id, u32 count,
  * This called from the GSI layer to notify the IPA layer that the hardware
  * has reported the completion of some number of transactions.
  */
-void ipa_gsi_channel_tx_completed(struct gsi *gsi, u32 channel_id, u32 count,
-				  u32 byte_count);
-void ipa_bam_channel_tx_completed(struct bam *gsi, u32 channel_id, u32 count,
-				  u32 byte_count);
+void ipa_transport_channel_tx_completed(struct ipa_transport *transport,
+					u32 channel_id, u32 count, u32 byte_count);
 
 /* ipa_gsi_endpoint_data_empty() - Empty endpoint config data test
  * @data:	endpoint configuration data

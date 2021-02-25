@@ -215,7 +215,7 @@ void *ipa_trans_pool_next(struct ipa_trans_pool *pool, void *element)
 }
 
 /* Return the oldest completed transaction for a channel (or null) */
-struct ipa_trans *ipa_channel_trans_complete(struct gsi_channel *channel)
+struct ipa_trans *ipa_channel_trans_complete(struct ipa_channel *channel)
 {
 	/*FIXME: */
 	return list_first_entry_or_null(&channel->trans_info.complete,
@@ -225,12 +225,8 @@ struct ipa_trans *ipa_channel_trans_complete(struct gsi_channel *channel)
 /* Move a transaction from the allocated list to the pending list */
 void ipa_trans_move_pending(struct ipa_trans *trans)
 {
-	struct ipa_trans_info *trans_info;
-
-	if (trans->gsi)
-		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
-	else if (trans->bam)
-		trans_info = &trans->bam->channel[trans->channel_id].trans_info;
+	struct ipa_channel *channel = &trans->transport->channel[trans->channel_id];
+	struct ipa_trans_info *trans_info = &channel->trans_info;
 
 	spin_lock_bh(&trans_info->spinlock);
 
@@ -244,13 +240,9 @@ void ipa_trans_move_pending(struct ipa_trans *trans)
  */
 void ipa_trans_move_complete(struct ipa_trans *trans)
 {
-	struct ipa_trans_info *trans_info;
+	struct ipa_channel *channel = &trans->transport->channel[trans->channel_id];
+	struct ipa_trans_info *trans_info = &channel->trans_info;
 	struct list_head list;
-
-	if (trans->gsi)
-		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
-	else if (trans->bam)
-		trans_info = &trans->bam->channel[trans->channel_id].trans_info;
 
 	spin_lock_bh(&trans_info->spinlock);
 
@@ -264,12 +256,8 @@ void ipa_trans_move_complete(struct ipa_trans *trans)
 /* Move a transaction from the completed list to the polled list */
 void ipa_trans_move_polled(struct ipa_trans *trans)
 {
-	struct ipa_trans_info *trans_info;
-
-	if (trans->gsi)
-		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
-	else if (trans->bam)
-		trans_info = &trans->bam->channel[trans->channel_id].trans_info;
+	struct ipa_channel *channel = &trans->transport->channel[trans->channel_id];
+	struct ipa_trans_info *trans_info = &channel->trans_info;
 
 	spin_lock_bh(&trans_info->spinlock);
 
@@ -283,28 +271,29 @@ struct ipa_trans *ipa_channel_trans_alloc(struct ipa *ipa, u32 channel_id,
 					  u32 tre_count,
 					  enum dma_data_direction direction)
 {
-	if (ipa->version == IPA_VERSION_2_6L)
-		return bam_channel_trans_alloc(&ipa->bam, channel_id,
-				tre_count, direction);
-	return gsi_channel_trans_alloc(&ipa->gsi, channel_id,
-			tre_count, direction);
+	if (ipa->version == IPA_VERSION_2_6L) {
+		struct bam *bam = to_bam(ipa->transport);
+
+		return bam_channel_trans_alloc(bam, channel_id, tre_count,
+					       direction);
+	} else {
+		struct gsi *gsi = to_gsi(ipa->transport);
+		return gsi_channel_trans_alloc(gsi, channel_id, tre_count,
+					       direction);
+	}
 }
 
 /* Free a previously-allocated transaction */
 void ipa_trans_free(struct ipa_trans *trans)
 {
+	struct ipa_channel *channel = &trans->transport->channel[trans->channel_id];
+	struct ipa_trans_info *trans_info = &channel->trans_info;
 	refcount_t *refcount = &trans->refcount;
-	struct ipa_trans_info *trans_info;
 	bool last;
 
 	/* We must hold the lock to release the last reference */
 	if (refcount_dec_not_one(refcount))
 		return;
-
-	if (trans->gsi)
-		trans_info = &trans->gsi->channel[trans->channel_id].trans_info;
-	else
-		trans_info = &trans->bam->channel[trans->channel_id].trans_info;
 
 	spin_lock_bh(&trans_info->spinlock);
 
@@ -323,7 +312,7 @@ void ipa_trans_free(struct ipa_trans *trans)
 	/* Releasing the reserved TREs implicitly frees the sgl[] and
 	 * (if present) info[] arrays, plus the transaction itself.
 	 */
-	if (trans->gsi)
+	if (trans->transport->version != IPA_VERSION_2_6L)
 		gsi_trans_tre_release(trans_info, trans->tre_count);
 }
 
@@ -373,10 +362,7 @@ int ipa_trans_page_add(struct ipa_trans *trans, struct page *page, u32 size,
 	/* assert(!trans->used); */
 
 	sg_set_page(sg, page, size, offset);
-	if (trans->gsi)
-		ret = dma_map_sg(trans->gsi->dev, sg, 1, trans->direction);
-	else
-		ret = dma_map_sg(trans->bam->dev, sg, 1, trans->direction);
+	ret = dma_map_sg(trans->transport->dev, sg, 1, trans->direction);
 	if (!ret)
 		return -ENOMEM;
 
@@ -401,10 +387,7 @@ int ipa_trans_skb_add(struct ipa_trans *trans, struct sk_buff *skb)
 		return ret;
 	used = ret;
 
-	if (trans->gsi)
-		ret = dma_map_sg(trans->gsi->dev, sg, 1, trans->direction);
-	else
-		ret = dma_map_sg(trans->bam->dev, sg, 1, trans->direction);
+	ret = dma_map_sg(trans->transport->dev, sg, 1, trans->direction);
 	if (!ret)
 		return -ENOMEM;
 
@@ -416,7 +399,7 @@ int ipa_trans_skb_add(struct ipa_trans *trans, struct sk_buff *skb)
 /* Commit a transaction */
 void ipa_trans_commit(struct ipa_trans *trans, bool ring_db)
 {
-	if (trans->gsi)
+	if (trans->transport->version != IPA_VERSION_2_6L)
 		gsi_trans_commit(trans, ring_db);
 	else
 		bam_trans_commit(trans);
@@ -425,7 +408,7 @@ void ipa_trans_commit(struct ipa_trans *trans, bool ring_db)
 /* Commit a GSI transaction and wait for it to complete */
 void ipa_trans_commit_wait(struct ipa_trans *trans)
 {
-	if (trans->gsi)
+	if (trans->transport->version != IPA_VERSION_2_6L)
 		gsi_trans_commit_wait(trans);
 	else
 		bam_trans_commit_wait(trans);
@@ -437,7 +420,7 @@ int ipa_trans_commit_wait_timeout(struct ipa_trans *trans,
 {
 	u32 ret = 0;
 
-	if (trans->gsi)
+	if (trans->transport->version != IPA_VERSION_2_6L)
 		ret = gsi_trans_commit_wait_timeout(trans, timeout);
 	else
 		ret = bam_trans_commit_wait_timeout(trans, timeout);
@@ -450,7 +433,7 @@ void ipa_trans_complete(struct ipa_trans *trans)
 {
 	/* If the entire SGL was mapped when added, unmap it now */
 	if (trans->direction != DMA_NONE)
-		dma_unmap_sg(trans->gsi->dev, trans->sgl, trans->used,
+		dma_unmap_sg(trans->transport->dev, trans->sgl, trans->used,
 			     trans->direction);
 
 	//FIXME: rename/refactor
@@ -461,17 +444,35 @@ void ipa_trans_complete(struct ipa_trans *trans)
 	ipa_trans_free(trans);
 }
 
-/* Cancel a channel's pending transactions */
-void ipa_channel_trans_cancel_pending(struct gsi_channel *gsi,
-		struct bam_channel *bam)
+int ipa_trans_read_byte(struct ipa_transport *transport, u32 channel_id, dma_addr_t addr)
 {
-	struct ipa_trans_info *trans_info = gsi ? &gsi->trans_info: &bam->trans_info;
+	if (transport->version == IPA_VERSION_2_6L) {
+		dev_warn(transport->dev, "Should not be here\n");
+		return 0;
+	} else {
+		struct gsi *gsi = to_gsi(transport);
+
+		return gsi_trans_read_byte(gsi, channel_id, addr);
+	}
+}
+
+void ipa_trans_read_byte_done(struct ipa_transport *transport, u32 channel_id)
+{
+	if (transport->version == IPA_VERSION_2_6L) {
+		dev_warn(transport->dev, "Should not be here\n");
+	} else {
+		struct gsi *gsi = to_gsi(transport);
+
+		return gsi_trans_read_byte_done(gsi, channel_id);
+	}
+}
+
+/* Cancel a channel's pending transactions */
+void ipa_channel_trans_cancel_pending(struct ipa_channel *channel)
+{
+	struct ipa_trans_info *trans_info = &channel->trans_info;
 	struct ipa_trans *trans;
 	bool cancelled;
-	if (gsi)
-		trans_info = &gsi->trans_info;
-	else
-		trans_info = &bam->trans_info;
 
 	/* channel->gsi->mutex is held by caller */
 	spin_lock_bh(&trans_info->spinlock);
@@ -486,5 +487,5 @@ void ipa_channel_trans_cancel_pending(struct gsi_channel *gsi,
 
 	/* Schedule NAPI polling to complete the cancelled transactions */
 	if (cancelled)
-		napi_schedule(gsi ? &gsi->napi : &bam->napi);
+		napi_schedule(&channel->napi);
 }

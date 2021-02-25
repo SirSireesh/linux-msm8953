@@ -172,7 +172,7 @@ struct ipa_gsi_endpoint_data {
 	u8 ee_id;		/* enum gsi_ee_id */
 	u8 channel_id;
 	u8 endpoint_id;
-	const char *channel_name; /* used only for SPS */
+	const char *channel_name; /* used only for BAM */
 	bool toward_ipa;
 
 	struct gsi_channel_data channel;

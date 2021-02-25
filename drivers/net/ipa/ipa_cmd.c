@@ -13,7 +13,6 @@
 #include "gsi.h"
 #include "bam.h"
 #include "ipa_trans.h"
-#include "bam_trans.h"
 #include "ipa.h"
 #include "ipa_endpoint.h"
 #include "ipa_table.h"
@@ -381,10 +380,10 @@ int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
 	return ret;
 }
 
-void ipa_cmd_pool_exit(struct gsi_channel *channel)
+void ipa_cmd_pool_exit(struct ipa_channel *channel)
 {
 	struct ipa_trans_info *trans_info = &channel->trans_info;
-	struct device *dev = channel->gsi->dev;
+	struct device *dev = channel->transport->dev;
 
 	ipa_trans_pool_exit(&trans_info->info_pool);
 	ipa_trans_pool_exit_dma(dev, &trans_info->cmd_pool);
@@ -397,10 +396,7 @@ ipa_cmd_payload_alloc(struct ipa *ipa, dma_addr_t *addr)
 	struct ipa_endpoint *endpoint;
 
 	endpoint = ipa->name_map[IPA_ENDPOINT_AP_COMMAND_TX];
-	if (ipa->version == IPA_VERSION_2_6L)
-		trans_info = &ipa->bam.channel[endpoint->channel_id].trans_info;
-	else
-		trans_info = &ipa->gsi.channel[endpoint->channel_id].trans_info;
+	trans_info = &ipa->transport->channel[endpoint->channel_id].trans_info;
 
 	return ipa_trans_pool_alloc_dma(&trans_info->cmd_pool, addr);
 }
@@ -409,7 +405,7 @@ void ipa_v2_cmd_table_init_add(struct ipa_trans *trans,
 			enum ipa_cmd_opcode opcode, u16 size, u32 offset,
 			dma_addr_t addr, bool ipv4)
 {
-	struct ipa *ipa = container_of(trans->bam, struct ipa, bam);
+	struct ipa *ipa = trans->transport->ipa;
 	enum dma_data_direction direction = DMA_TO_DEVICE;
 	union ipa_cmd_payload *cmd_payload;
 	dma_addr_t payload_addr;
@@ -446,7 +442,7 @@ void ipa_v3_cmd_table_init_add(struct ipa_trans *trans,
 			       dma_addr_t addr, u16 hash_size, u32 hash_offset,
 			       dma_addr_t hash_addr)
 {
-	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
+	struct ipa *ipa = trans->transport->ipa;
 	enum dma_data_direction direction = DMA_TO_DEVICE;
 	struct ipa_cmd_hw_ip_fltrt_init *payload;
 	union ipa_cmd_payload *cmd_payload;
@@ -486,29 +482,24 @@ void ipa_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
 			    u16 hash_size, u32 hash_offset,
 			    dma_addr_t hash_addr, bool ipv4)
 {
-	if (trans->gsi)
-		ipa_v3_cmd_table_init_add(trans, opcode, size, offset, addr,
-					  hash_size, hash_offset, hash_addr);
-	else
+	if (trans->transport->version == IPA_VERSION_2_6L)
 		ipa_v2_cmd_table_init_add(trans, opcode, size, offset, addr,
 					  ipv4);
+	else
+		ipa_v3_cmd_table_init_add(trans, opcode, size, offset, addr,
+					  hash_size, hash_offset, hash_addr);
 }
 
 /* Initialize header space in IPA-local memory */
 void ipa_cmd_hdr_init_local_add(struct ipa_trans *trans, u32 offset, u16 size,
 				dma_addr_t addr)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	enum ipa_cmd_opcode opcode = IPA_CMD_HDR_INIT_LOCAL;
 	enum dma_data_direction direction = DMA_TO_DEVICE;
 	union ipa_cmd_payload *cmd_payload;
 	dma_addr_t payload_addr;
 	u32 flags;
-
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
 
 	offset += ipa->mem_offset;
 
@@ -524,7 +515,7 @@ void ipa_cmd_hdr_init_local_add(struct ipa_trans *trans, u32 offset, u16 size,
 
 		payload->hdr_tbl_src_addr = cpu_to_le32(addr);
 		payload->size_hdr_tbl = cpu_to_le16(size);
-		payload->hdr_tbl_dst_addr = cpu_to_le16(ipa->mem_offset + offset);
+		payload->hdr_tbl_dst_addr = cpu_to_le16(offset);
 
 		ipa_trans_cmd_add(trans, payload, sizeof(*payload),
 				payload_addr, direction, opcode);
@@ -545,7 +536,7 @@ void ipa_cmd_hdr_init_local_add(struct ipa_trans *trans, u32 offset, u16 size,
 void ipa_v2_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 value,
 				u32 mask, bool clear_full)
 {
-	struct ipa *ipa = container_of(trans->bam, struct ipa, bam);
+	struct ipa *ipa = trans->transport->ipa;
 	struct ipa_v2_cmd_register_write *payload;
 	union ipa_cmd_payload *cmd_payload;
 	u32 opcode = IPA_CMD_REGISTER_WRITE;
@@ -574,7 +565,7 @@ void ipa_v2_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 valu
 void ipa_v3_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 value,
 				u32 mask, bool clear_full)
 {
-	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
+	struct ipa *ipa = trans->transport->ipa;
 	struct ipa_cmd_register_write *payload;
 	union ipa_cmd_payload *cmd_payload;
 	u32 opcode = IPA_CMD_REGISTER_WRITE;
@@ -627,26 +618,21 @@ void ipa_v3_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 valu
 void ipa_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 value,
 				u32 mask, bool clear_full)
 {
-	if (trans->gsi)
-		ipa_v3_cmd_register_write_add(trans, offset, value, mask, clear_full);
-	else
+	if (trans->transport->version == IPA_VERSION_2_6L)
 		ipa_v2_cmd_register_write_add(trans, offset, value, mask, clear_full);
+	else
+		ipa_v3_cmd_register_write_add(trans, offset, value, mask, clear_full);
 }
 
 /* Skip IP packet processing on the next data transfer on a TX channel */
 static void ipa_cmd_ip_packet_init_add(struct ipa_trans *trans, u8 endpoint_id)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	enum ipa_cmd_opcode opcode = IPA_CMD_IP_PACKET_INIT;
 	enum dma_data_direction direction = DMA_TO_DEVICE;
 	struct ipa_cmd_ip_packet_init *payload;
 	union ipa_cmd_payload *cmd_payload;
 	dma_addr_t payload_addr;
-
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
 
 	/* The IP_PACKET_INIT command format is the same on all IPA versions */
 
@@ -667,7 +653,7 @@ static void ipa_cmd_ip_packet_init_add(struct ipa_trans *trans, u8 endpoint_id)
 void ipa_cmd_dma_shared_mem_add(struct ipa_trans *trans, u32 offset, u16 size,
 				dma_addr_t addr, bool toward_ipa)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	enum ipa_cmd_opcode opcode = IPA_CMD_DMA_SHARED_MEM;
 	union ipa_cmd_payload *cmd_payload;
 	enum dma_data_direction direction;
@@ -677,10 +663,6 @@ void ipa_cmd_dma_shared_mem_add(struct ipa_trans *trans, u32 offset, u16 size,
 	/* size and offset must fit in 16 bit fields */
 	/* assert(size > 0 && size <= U16_MAX); */
 	/* assert(offset <= U16_MAX && ipa->mem_offset <= U16_MAX - offset); */
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
 
 	offset += ipa->mem_offset;
 	direction = toward_ipa ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
@@ -730,7 +712,7 @@ void ipa_cmd_dma_shared_mem_add(struct ipa_trans *trans, u32 offset, u16 size,
 
 static void ipa_cmd_ip_tag_status_add(struct ipa_trans *trans, u64 tag)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	enum ipa_cmd_opcode opcode = IPA_CMD_IP_PACKET_TAG_STATUS;
 	enum dma_data_direction direction = DMA_TO_DEVICE;
 	struct ipa_cmd_ip_packet_tag_status *payload;
@@ -738,13 +720,10 @@ static void ipa_cmd_ip_tag_status_add(struct ipa_trans *trans, u64 tag)
 	dma_addr_t payload_addr;
 	u64 tag_mask;
 
-	if (trans->gsi) {
-		ipa = container_of(trans->gsi, struct ipa, gsi);
+	if (trans->transport->version == IPA_VERSION_2_6L)
 		tag_mask = IPA_V2_IP_PACKET_TAG_STATUS_TAG_FMASK;
-	} else {
-		ipa = container_of(trans->bam, struct ipa, bam);
+	else
 		tag_mask = IPA_V3_IP_PACKET_TAG_STATUS_TAG_FMASK;
-	}
 
 	/* assert(tag <= field_max(IP_PACKET_TAG_STATUS_TAG_FMASK)); */
 
@@ -760,16 +739,11 @@ static void ipa_cmd_ip_tag_status_add(struct ipa_trans *trans, u64 tag)
 /* Issue a small command TX data transfer */
 static void ipa_cmd_transfer_add(struct ipa_trans *trans, u16 size)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	enum dma_data_direction direction = DMA_TO_DEVICE;
 	enum ipa_cmd_opcode opcode = IPA_CMD_NONE;
 	union ipa_cmd_payload *payload;
 	dma_addr_t payload_addr;
-
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
 
 	/* assert(size <= sizeof(*payload)); */
 
@@ -782,17 +756,14 @@ static void ipa_cmd_transfer_add(struct ipa_trans *trans, u16 size)
 
 void ipa_cmd_tag_process_add(struct ipa_trans *trans)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	struct ipa_endpoint *endpoint;
 	u64 cookie;
 
-	if (trans->gsi) {
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-		cookie = IPA_V3_COOKIE;
-	} else {
-		ipa = container_of(trans->bam, struct ipa, bam);
+	if (trans->transport->version == IPA_VERSION_2_6L)
 		cookie = IPA_V2_COOKIE;
-	}
+	else
+		cookie = IPA_V3_COOKIE;
 
 	endpoint = ipa->name_map[IPA_ENDPOINT_AP_LAN_RX];
 
@@ -829,10 +800,7 @@ ipa_cmd_info_alloc(struct ipa_endpoint *endpoint, u32 tre_count)
 	struct ipa *ipa = endpoint->ipa;
 	struct ipa_trans_info *trans_info;
 
-	if (ipa->version == IPA_VERSION_2_6L)
-		trans_info = &ipa->bam.channel[endpoint->channel_id].trans_info;
-	else
-		trans_info = &ipa->gsi.channel[endpoint->channel_id].trans_info;
+	trans_info = &ipa->transport->channel[endpoint->channel_id].trans_info;
 
 	return ipa_trans_pool_alloc(&trans_info->info_pool, tre_count);
 }
@@ -845,12 +813,8 @@ struct ipa_trans *ipa_cmd_trans_alloc(struct ipa *ipa, u32 tre_count)
 
 	endpoint = ipa->name_map[IPA_ENDPOINT_AP_COMMAND_TX];
 
-	if (ipa->version == IPA_VERSION_2_6L)
-		trans = bam_channel_trans_alloc(&ipa->bam, endpoint->channel_id,
-				tre_count, DMA_NONE);
-	else
-		trans = gsi_channel_trans_alloc(&ipa->gsi, endpoint->channel_id,
-				tre_count, DMA_NONE);
+	trans = ipa_channel_trans_alloc(ipa, endpoint->channel_id, tre_count,
+					DMA_NONE);
 	if (trans)
 		trans->info = ipa_cmd_info_alloc(endpoint, tre_count);
 

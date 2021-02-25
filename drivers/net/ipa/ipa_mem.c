@@ -30,13 +30,8 @@
 static void
 ipa_mem_zero_region_add(struct ipa_trans *trans, const struct ipa_mem *mem)
 {
-	struct ipa *ipa;
+	struct ipa *ipa = trans->transport->ipa;
 	dma_addr_t addr;
-
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
 
 	addr = ipa->zero_addr;
 
@@ -77,6 +72,7 @@ int ipa_mem_setup(struct ipa *ipa)
 		 * modem header memory. There is no AP_HEADER either, but since we
 		 * only care about its size, and not region, its fine.
 		 */
+		pr_info("ipa: prepping mem dma commit\n");
 		trans = ipa_cmd_trans_alloc(ipa, 4);
 		if (!trans) {
 			dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
@@ -564,10 +560,8 @@ int ipa_mem_init(struct ipa *ipa, const struct ipa_mem_data *mem_data)
 		goto err_unmap;
 
 	ret = ipa_smem_init(ipa, mem_data->smem_id, mem_data->smem_size);
-	if (ret) {
-		dev_err(dev, "failed to init SMEM region: %d\n", ret);
+	if (ret)
 		goto err_imem_exit;
-	}
 
 	return 0;
 

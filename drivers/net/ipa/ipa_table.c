@@ -264,7 +264,7 @@ static dma_addr_t ipa_table_addr(struct ipa *ipa, bool filter_mask, u16 count)
 static void ipa_v2_table_reset_add(struct ipa_trans *trans, bool filter,
 				u16 first, u16 count, const struct ipa_mem *mem)
 {
-	struct ipa *ipa = container_of(trans->bam, struct ipa, bam);
+	struct ipa *ipa = trans->transport->ipa;
 	dma_addr_t addr;
 	u32 offset;
 	u16 size;
@@ -286,7 +286,7 @@ static void ipa_v2_table_reset_add(struct ipa_trans *trans, bool filter,
 static void ipa_v3_table_reset_add(struct ipa_trans *trans, bool filter,
 				u16 first, u16 count, const struct ipa_mem *mem)
 {
-	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
+	struct ipa *ipa = trans->transport->ipa;
 	dma_addr_t addr;
 	u32 offset;
 	u16 size;
@@ -308,10 +308,10 @@ static void ipa_v3_table_reset_add(struct ipa_trans *trans, bool filter,
 static void ipa_table_reset_add(struct ipa_trans *trans, bool filter,
 				u16 first, u16 count, const struct ipa_mem *mem)
 {
-	if (trans->gsi)
-		ipa_v3_table_reset_add(trans, filter, first, count, mem);
-	else
+	if (trans->transport->version == IPA_VERSION_2_6L)
 		ipa_v2_table_reset_add(trans, filter, first, count, mem);
+	else
+		ipa_v3_table_reset_add(trans, filter, first, count, mem);
 }
 
 /* Reset entries in a single filter table belonging to either the AP or
@@ -474,7 +474,7 @@ static void ipa_v2_table_init_add(struct ipa_trans *trans, bool filter,
 			       bool ipv4, enum ipa_cmd_opcode opcode,
 			       const struct ipa_mem *mem)
 {
-	struct ipa *ipa = container_of(trans->bam, struct ipa, bam);
+	struct ipa *ipa = trans->transport->ipa;
 	dma_addr_t addr;
 	u16 count;
 	u16 size;
@@ -499,7 +499,7 @@ static void ipa_v3_table_init_add(struct ipa_trans *trans, bool filter,
 			       const struct ipa_mem *mem,
 			       const struct ipa_mem *hash_mem)
 {
-	struct ipa *ipa = container_of(trans->gsi, struct ipa, gsi);
+	struct ipa *ipa = trans->transport->ipa;
 	dma_addr_t hash_addr;
 	dma_addr_t addr;
 	u16 hash_count;

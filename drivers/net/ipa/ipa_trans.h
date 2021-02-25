@@ -12,18 +12,18 @@
 #include <linux/dma-direction.h>
 #include <linux/dmaengine.h>
 
-#include "gsi_trans.h"
-#include "bam_trans.h"
-
+enum ipa_cmd_opcode;
+struct ipa;
+struct ipa_trans_pool;
 struct scatterlist;
+struct sk_buff;
 
 /**
  * struct ipa_trans - an IPA transaction
  *
  * Most fields in this structure for internal use by the transaction core code:
  * @links:	Links for channel transaction lists by state
- * @bam:	SPS pointer
- * @gsi:	GSI pointer
+ * @tranport:	PIA transport pointer
  * @channel_id: Channel number transaction is associated with
  * @cancelled:	If set by the core code, transaction was cancelled
  * @tre_count:	Number of TREs reserved for this transaction
@@ -44,8 +44,7 @@ struct scatterlist;
 struct ipa_trans {
 	struct list_head links;		/* (gsi/bam)_channel lists */
 
-	struct bam *bam;
-	struct gsi *gsi;
+	struct ipa_transport *transport;
 
 	u8 channel_id;
 
@@ -211,7 +210,7 @@ int ipa_trans_commit_wait_timeout(struct ipa_trans *trans,
  * This is not a transaction operation at all.  It's defined here because
  * it needs to be done in coordination with other transaction activity.
  */
-int ipa_trans_read_byte(struct ipa *ipa, u32 channel_id, dma_addr_t addr);
+int ipa_trans_read_byte(struct ipa_transport *transport, u32 channel_id, dma_addr_t addr);
 
 /**
  * ipa_trans_read_byte_done() - Clean up after a single byte read TRE
@@ -221,7 +220,7 @@ int ipa_trans_read_byte(struct ipa *ipa, u32 channel_id, dma_addr_t addr);
  * This function needs to be called to signal that the work related
  * to reading a byte initiated by ipa_trans_read_byte() is complete.
  */
-void ipa_trans_read_byte_done(struct ipa *ipa, u32 channel_id);
+void ipa_trans_read_byte_done(struct ipa_transport *transport, u32 channel_id);
 
 void ipa_trans_move_pending(struct ipa_trans *trans);
 

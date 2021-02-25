@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 
 /* Copyright (c) 2020, The Linux Foundation. All rights reserved. */
-#ifndef _SPS_TRANS_H_
-#define _SPS_TRANS_H_
+#ifndef _BAM_TRANS_H_
+#define _BAM_TRANS_H_
 
 #include <linux/types.h>
 #include <linux/refcount.h>
@@ -62,4 +62,4 @@ void bam_trans_commit_wait(struct ipa_trans *trans);
 int bam_trans_commit_wait_timeout(struct ipa_trans *trans,
 				  unsigned long timeout);
 
-#endif /* _SPS_TRANS_H_ */
+#endif /* _BAM_TRANS_H_ */

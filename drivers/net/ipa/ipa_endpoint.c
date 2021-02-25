@@ -24,8 +24,8 @@
 
 #define atomic_dec_not_zero(v)	atomic_add_unless((v), -1, 0)
 
-/*FIXME: SPS Descriptor threshold might be higher */
-#define SPS_DESCRIPTOR_THRESHOLD 0x16
+/*FIXME: BAM Descriptor threshold might be higher */
+#define BAM_DESCRIPTOR_THRESHOLD 0x16
 
 #define IPA_REPLENISH_BATCH	16
 
@@ -1062,7 +1062,7 @@ err_free_pages:
  */
 static void ipa_endpoint_replenish(struct ipa_endpoint *endpoint, u32 count)
 {
-	struct gsi *gsi;
+	struct ipa_transport *transport = endpoint->ipa->transport;
 	u32 backlog, backlog_limit;
 
 	if (!endpoint->replenish_enabled) {
@@ -1094,11 +1094,10 @@ try_again_later:
 	 * try replenishing again if our backlog is *all* available TREs.
 	 */
 
-	gsi = &endpoint->ipa->gsi;
 	if (endpoint->ipa->version == IPA_VERSION_2_6L)
 		backlog_limit = IPA_V2_REPLENISH_BACKLOG_LIMIT;
 	else
-		backlog_limit = gsi_channel_tre_max(gsi, endpoint->channel_id);
+		backlog_limit = ipa_channel_tre_max(transport, endpoint->channel_id);
 	if (backlog == backlog_limit)
 		schedule_delayed_work(&endpoint->replenish_work,
 				      msecs_to_jiffies(1));
@@ -1118,8 +1117,7 @@ static void ipa_endpoint_replenish_enable(struct ipa_endpoint *endpoint)
 		/* RX_POOL_SIZE = 100 */
 		max_backlog = IPA_V2_RX_QUEUE_SIZE;
 	else
-		/* Start replenishing if hardware currently has no buffers */
-		max_backlog = gsi_channel_tre_max(&ipa->gsi, endpoint->channel_id);
+		max_backlog = ipa_channel_tre_max(ipa->transport, endpoint->channel_id);
 	if (atomic_read(&endpoint->replenish_backlog) == max_backlog)
 		ipa_endpoint_replenish(endpoint, 0);
 }
@@ -1383,7 +1381,7 @@ static int ipa_endpoint_reset_rx_aggr(struct ipa_endpoint *endpoint)
 {
 	struct device *dev = &endpoint->ipa->pdev->dev;
 	struct ipa *ipa = endpoint->ipa;
-	struct gsi *gsi = &ipa->gsi;
+	struct ipa_transport *transport = ipa->transport;
 	bool suspended = false;
 	dma_addr_t addr;
 	u32 retries;
@@ -1409,17 +1407,17 @@ static int ipa_endpoint_reset_rx_aggr(struct ipa_endpoint *endpoint)
 	 * active.  We'll re-enable the doorbell (if appropriate) when
 	 * we reset again below.
 	 */
-	gsi_channel_reset(gsi, endpoint->channel_id, false);
+	ipa_channel_reset(transport, endpoint->channel_id, false);
 
 	/* Make sure the channel isn't suspended */
 	suspended = ipa_endpoint_program_suspend(endpoint, false);
 
 	/* Start channel and do a 1 byte read */
-	ret = gsi_channel_start(gsi, endpoint->channel_id);
+	ret = ipa_channel_start(transport, endpoint->channel_id);
 	if (ret)
 		goto out_suspend_again;
 
-	ret = gsi_trans_read_byte(gsi, endpoint->channel_id, addr);
+	ret = ipa_trans_read_byte(transport, endpoint->channel_id, addr);
 	if (ret)
 		goto err_endpoint_stop;
 
@@ -1436,9 +1434,9 @@ static int ipa_endpoint_reset_rx_aggr(struct ipa_endpoint *endpoint)
 		dev_err(dev, "endpoint %u still active during reset\n",
 			endpoint->endpoint_id);
 
-	gsi_trans_read_byte_done(gsi, endpoint->channel_id);
+	ipa_trans_read_byte_done(transport, endpoint->channel_id);
 
-	ret = gsi_channel_stop(gsi, endpoint->channel_id);
+	ret = ipa_channel_stop(transport, endpoint->channel_id);
 	if (ret)
 		goto out_suspend_again;
 
@@ -1447,14 +1445,14 @@ static int ipa_endpoint_reset_rx_aggr(struct ipa_endpoint *endpoint)
 	 * complete the channel reset sequence.  Finish by suspending the
 	 * channel again (if necessary).
 	 */
-	gsi_channel_reset(gsi, endpoint->channel_id, true);
+	ipa_channel_reset(transport, endpoint->channel_id, true);
 
 	msleep(1);
 
 	goto out_suspend_again;
 
 err_endpoint_stop:
-	(void)gsi_channel_stop(gsi, endpoint->channel_id);
+	(void)ipa_channel_stop(transport, endpoint->channel_id);
 out_suspend_again:
 	if (suspended)
 		(void)ipa_endpoint_program_suspend(endpoint, true);
@@ -1481,8 +1479,8 @@ static void ipa_endpoint_reset(struct ipa_endpoint *endpoint)
 			endpoint->data->aggregation;
 	if (special && ipa_endpoint_aggr_active(endpoint))
 		ret = ipa_endpoint_reset_rx_aggr(endpoint);
-	else if (ipa->version != IPA_VERSION_2_6L)
-		gsi_channel_reset(&ipa->gsi, channel_id, true);
+	else
+		ipa_channel_reset(ipa->transport, channel_id, true);
 
 	if (ret)
 		dev_err(&ipa->pdev->dev,
@@ -1514,21 +1512,15 @@ static void ipa_endpoint_program(struct ipa_endpoint *endpoint)
 int ipa_endpoint_enable_one(struct ipa_endpoint *endpoint)
 {
 	struct ipa *ipa = endpoint->ipa;
-	struct gsi *gsi = &ipa->gsi;
 	int ret;
 
-	/* IPA version 2.6L does not use GSI
-	 * SPS channels do not "start" and "stop"
-	 */
-	if (ipa->version != IPA_VERSION_2_6L) {
-		ret = gsi_channel_start(gsi, endpoint->channel_id);
-		if (ret) {
-			dev_err(&ipa->pdev->dev,
-					"error %d starting %cX channel %u for endpoint %u\n",
-					ret, endpoint->toward_ipa ? 'T' : 'R',
-					endpoint->channel_id, endpoint->endpoint_id);
-			return ret;
-		}
+	ret = ipa_channel_start(ipa->transport, endpoint->channel_id);
+	if (ret) {
+		dev_err(&ipa->pdev->dev,
+				"error %d starting %cX channel %u for endpoint %u\n",
+				ret, endpoint->toward_ipa ? 'T' : 'R',
+				endpoint->channel_id, endpoint->endpoint_id);
+		return ret;
 	}
 
 	if (!endpoint->toward_ipa) {
@@ -1547,7 +1539,6 @@ void ipa_endpoint_disable_one(struct ipa_endpoint *endpoint)
 {
 	u32 mask = BIT(endpoint->endpoint_id);
 	struct ipa *ipa = endpoint->ipa;
-	struct gsi *gsi = &ipa->gsi;
 	int ret;
 
 	if (!(ipa->enabled & mask))
@@ -1565,7 +1556,7 @@ void ipa_endpoint_disable_one(struct ipa_endpoint *endpoint)
 	if (ipa->version == IPA_VERSION_2_6L)
 		return;
 	/* Note that if stop fails, the channel's state is not well-defined */
-	ret = gsi_channel_stop(gsi, endpoint->channel_id);
+	ret = ipa_channel_stop(ipa->transport, endpoint->channel_id);
 	if (ret)
 		dev_err(&ipa->pdev->dev,
 			"error %d attempting to stop endpoint %u\n", ret,
@@ -1575,7 +1566,7 @@ void ipa_endpoint_disable_one(struct ipa_endpoint *endpoint)
 void ipa_endpoint_suspend_one(struct ipa_endpoint *endpoint)
 {
 	struct device *dev = &endpoint->ipa->pdev->dev;
-	struct gsi *gsi = &endpoint->ipa->gsi;
+	struct ipa_transport *transport = endpoint->ipa->transport;
 	bool stop_channel;
 	int ret;
 
@@ -1589,7 +1580,7 @@ void ipa_endpoint_suspend_one(struct ipa_endpoint *endpoint)
 
 	/* IPA v3.5.1 doesn't use channel stop for suspend */
 	stop_channel = endpoint->ipa->version != IPA_VERSION_3_5_1;
-	ret = gsi_channel_suspend(gsi, endpoint->channel_id, stop_channel);
+	ret = ipa_channel_suspend(transport, endpoint->channel_id, stop_channel);
 	if (ret)
 		dev_err(dev, "error %d suspending channel %u\n", ret,
 			endpoint->channel_id);
@@ -1598,7 +1589,7 @@ void ipa_endpoint_suspend_one(struct ipa_endpoint *endpoint)
 void ipa_endpoint_resume_one(struct ipa_endpoint *endpoint)
 {
 	struct device *dev = &endpoint->ipa->pdev->dev;
-	struct gsi *gsi = &endpoint->ipa->gsi;
+	struct ipa_transport *transport = endpoint->ipa->transport;
 	bool start_channel;
 	int ret;
 
@@ -1610,7 +1601,7 @@ void ipa_endpoint_resume_one(struct ipa_endpoint *endpoint)
 
 	/* IPA v3.5.1 doesn't use channel start for resume */
 	start_channel = endpoint->ipa->version != IPA_VERSION_3_5_1;
-	ret = gsi_channel_resume(gsi, endpoint->channel_id, start_channel);
+	ret = ipa_channel_resume(transport, endpoint->channel_id, start_channel);
 	if (ret)
 		dev_err(dev, "error %d resuming channel %u\n", ret,
 			endpoint->channel_id);
@@ -1646,7 +1637,6 @@ void ipa_endpoint_resume(struct ipa *ipa)
 
 static void ipa_endpoint_setup_one(struct ipa_endpoint *endpoint)
 {
-	struct gsi *gsi = &endpoint->ipa->gsi;
 	u32 channel_id = endpoint->channel_id;
 	struct ipa *ipa = endpoint->ipa;
 
@@ -1654,11 +1644,10 @@ static void ipa_endpoint_setup_one(struct ipa_endpoint *endpoint)
 	if (endpoint->ee_id != GSI_EE_AP)
 		return;
 
-	/* IPA version 2.6L does not use GSI */
 	if (ipa->version != IPA_VERSION_2_6L)
-		endpoint->trans_tre_max = gsi_channel_trans_tre_max(gsi, channel_id);
+		endpoint->trans_tre_max = ipa_channel_trans_tre_max(ipa->transport, channel_id);
 	else
-		endpoint->trans_tre_max = SPS_DESCRIPTOR_THRESHOLD;
+		endpoint->trans_tre_max = BAM_DESCRIPTOR_THRESHOLD;
 
 	if (!endpoint->toward_ipa) {
 		/* RX transactions require a single TRE, so the maximum
@@ -1669,7 +1658,7 @@ static void ipa_endpoint_setup_one(struct ipa_endpoint *endpoint)
 			atomic_set(&endpoint->replenish_saved, IPA_V2_RX_QUEUE_SIZE);
 		else
 			atomic_set(&endpoint->replenish_saved,
-				gsi_channel_tre_max(gsi, endpoint->channel_id));
+				ipa_channel_tre_max(ipa->transport, endpoint->channel_id));
 		atomic_set(&endpoint->replenish_backlog, 0);
 		INIT_DELAYED_WORK(&endpoint->replenish_work,
 				ipa_endpoint_replenish_work);

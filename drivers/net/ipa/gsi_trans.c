@@ -87,23 +87,27 @@ struct gsi_tre {
 #define TRE_FLAGS_TYPE_FMASK	GENMASK(23, 16)
 
 /* Map a given ring entry index to the transaction associated with it */
-static void gsi_channel_trans_map(struct gsi_channel *channel, u32 index,
+static void gsi_channel_trans_map(struct ipa_channel *channel, u32 index,
 				  struct ipa_trans *trans)
 {
+	struct gsi_channel_priv *priv = channel->priv;
+
 	/* Note: index *must* be used modulo the ring count here */
-	channel->trans_info.map[index % channel->tre_ring.count] = trans;
+	channel->trans_info.map[index % priv->tre_ring.count] = trans;
 }
 
 /* Return the transaction mapped to a given ring entry */
 struct ipa_trans *
-gsi_channel_trans_mapped(struct gsi_channel *channel, u32 index)
+gsi_channel_trans_mapped(struct ipa_channel *channel, u32 index)
 {
+	struct gsi_channel_priv *priv = channel->priv;
+
 	/* Note: index *must* be used modulo the ring count here */
-	return channel->trans_info.map[index % channel->tre_ring.count];
+	return channel->trans_info.map[index % priv->tre_ring.count];
 }
 
 /* Return the oldest completed transaction for a channel (or null) */
-struct ipa_trans *gsi_channel_trans_complete(struct gsi_channel *channel)
+struct ipa_trans *gsi_channel_trans_complete(struct ipa_channel *channel)
 {
 	return list_first_entry_or_null(&channel->trans_info.complete,
 					struct ipa_trans, links);
@@ -137,7 +141,7 @@ struct ipa_trans *gsi_channel_trans_alloc(struct gsi *gsi, u32 channel_id,
 					  u32 tre_count,
 					  enum dma_data_direction direction)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
 	struct ipa_trans_info *trans_info;
 	struct ipa_trans *trans;
 
@@ -153,7 +157,7 @@ struct ipa_trans *gsi_channel_trans_alloc(struct gsi *gsi, u32 channel_id,
 
 	/* Allocate and initialize non-zero fields in the the transaction */
 	trans = ipa_trans_pool_alloc(&trans_info->pool, 1);
-	trans->gsi = gsi;
+	trans->transport = &gsi->base;
 	trans->channel_id = channel_id;
 	trans->tre_count = tre_count;
 	init_completion(&trans->completion);
@@ -235,8 +239,9 @@ static void gsi_trans_tre_fill(struct gsi_tre *dest_tre, dma_addr_t addr,
  */
 static void __gsi_trans_commit(struct ipa_trans *trans, bool ring_db)
 {
-	struct gsi_channel *channel = &trans->gsi->channel[trans->channel_id];
-	struct gsi_ring *ring = &channel->tre_ring;
+	struct ipa_channel *channel = &trans->transport->channel[trans->channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
+	struct gsi_ring *ring = &priv->tre_ring;
 	enum ipa_cmd_opcode opcode = IPA_CMD_NONE;
 	bool bei = channel->toward_ipa;
 	struct ipa_cmd_info *info;
@@ -347,7 +352,7 @@ void gsi_trans_complete(struct ipa_trans *trans)
 {
 	/* If the entire SGL was mapped when added, unmap it now */
 	if (trans->direction != DMA_NONE)
-		dma_unmap_sg(trans->gsi->dev, trans->sgl, trans->used,
+		dma_unmap_sg(trans->transport->dev, trans->sgl, trans->used,
 			     trans->direction);
 
 	ipa_gsi_trans_complete(trans);
@@ -358,7 +363,7 @@ void gsi_trans_complete(struct ipa_trans *trans)
 }
 
 /* Cancel a channel's pending transactions */
-void gsi_channel_trans_cancel_pending(struct gsi_channel *channel)
+void gsi_channel_trans_cancel_pending(struct ipa_channel *channel)
 {
 	struct ipa_trans_info *trans_info = &channel->trans_info;
 	struct ipa_trans *trans;
@@ -383,8 +388,9 @@ void gsi_channel_trans_cancel_pending(struct gsi_channel *channel)
 /* Issue a command to read a single byte from a channel */
 int gsi_trans_read_byte(struct gsi *gsi, u32 channel_id, dma_addr_t addr)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
-	struct gsi_ring *ring = &channel->tre_ring;
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
+	struct gsi_ring *ring = &priv->tre_ring;
 	struct ipa_trans_info *trans_info;
 	struct gsi_tre *dest_tre;
 
@@ -408,7 +414,7 @@ int gsi_trans_read_byte(struct gsi *gsi, u32 channel_id, dma_addr_t addr)
 /* Mark a gsi_trans_read_byte() request done */
 void gsi_trans_read_byte_done(struct gsi *gsi, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
 
 	gsi_trans_tre_release(&channel->trans_info, 1);
 }
@@ -416,7 +422,8 @@ void gsi_trans_read_byte_done(struct gsi *gsi, u32 channel_id)
 /* Initialize a channel's GSI transaction info */
 int gsi_channel_trans_init(struct gsi *gsi, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
 	struct ipa_trans_info *trans_info;
 	u32 tre_max;
 	int ret;
@@ -429,7 +436,7 @@ int gsi_channel_trans_init(struct gsi *gsi, u32 channel_id)
 	 * map entry per TRE.
 	 */
 	trans_info = &channel->trans_info;
-	trans_info->map = kcalloc(channel->tre_count, sizeof(*trans_info->map),
+	trans_info->map = kcalloc(priv->tre_count, sizeof(*trans_info->map),
 				  GFP_KERNEL);
 	if (!trans_info->map)
 		return -ENOMEM;
@@ -441,7 +448,7 @@ int gsi_channel_trans_init(struct gsi *gsi, u32 channel_id)
 	 * for transactions (including transaction structures) based on
 	 * this maximum number.
 	 */
-	tre_max = gsi_channel_tre_max(channel->gsi, channel_id);
+	tre_max = ipa_channel_tre_max(channel->transport, channel_id);
 
 	/* Transactions are allocated one at a time. */
 	ret = ipa_trans_pool_init(&trans_info->pool, sizeof(struct ipa_trans),
@@ -461,7 +468,7 @@ int gsi_channel_trans_init(struct gsi *gsi, u32 channel_id)
 	 */
 	ret = ipa_trans_pool_init(&trans_info->sg_pool,
 				  sizeof(struct scatterlist),
-				  tre_max, channel->tlv_count);
+				  tre_max, priv->tlv_count);
 	if (ret)
 		goto err_trans_pool_exit;
 
@@ -487,14 +494,14 @@ err_trans_pool_exit:
 err_kfree:
 	kfree(trans_info->map);
 
-	dev_err(gsi->dev, "error %d initializing channel %u transactions\n",
+	dev_err(gsi->base.dev, "error %d initializing channel %u transactions\n",
 		ret, channel_id);
 
 	return ret;
 }
 
 /* Inverse of gsi_channel_trans_init() */
-void gsi_channel_trans_exit(struct gsi_channel *channel)
+void gsi_channel_trans_exit(struct ipa_channel *channel)
 {
 	struct ipa_trans_info *trans_info = &channel->trans_info;
 

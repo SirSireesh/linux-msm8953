@@ -15,6 +15,7 @@
 #include <linux/platform_device.h>
 #include <linux/netdevice.h>
 
+#include "ipa.h"
 #include "gsi.h"
 #include "gsi_reg.h"
 #include "gsi_private.h"
@@ -171,9 +172,9 @@ static void gsi_validate_build(void)
 }
 
 /* Return the channel id associated with a given channel */
-static u32 gsi_channel_id(struct gsi_channel *channel)
+static u32 gsi_channel_id(struct ipa_channel *channel)
 {
-	return channel - &channel->gsi->channel[0];
+	return channel - &channel->transport->channel[0];
 }
 
 /* Update the GSI IRQ type register with the cached value */
@@ -208,7 +209,7 @@ static void gsi_irq_setup(struct gsi *gsi)
 	iowrite32(0, gsi->virt + GSI_CNTXT_SRC_IEOB_IRQ_MSK_OFFSET);
 
 	/* Reverse the offset adjustment for inter-EE register offsets */
-	adjust = gsi->version < IPA_VERSION_4_5 ? 0 : GSI_EE_REG_ADJUST;
+	adjust = gsi->base.version < IPA_VERSION_4_5 ? 0 : GSI_EE_REG_ADJUST;
 	iowrite32(0, gsi->virt + adjust + GSI_INTER_EE_SRC_CH_IRQ_OFFSET);
 	iowrite32(0, gsi->virt + adjust + GSI_INTER_EE_SRC_EV_CH_IRQ_OFFSET);
 
@@ -332,7 +333,7 @@ static void evt_ring_command(struct gsi *gsi, u32 evt_ring_id,
 {
 	struct gsi_evt_ring *evt_ring = &gsi->evt_ring[evt_ring_id];
 	struct completion *completion = &evt_ring->completion;
-	struct device *dev = gsi->dev;
+	struct device *dev = gsi->base.dev;
 	bool success;
 	u32 val;
 
@@ -376,7 +377,7 @@ static int gsi_evt_ring_alloc_command(struct gsi *gsi, u32 evt_ring_id)
 	/* Get initial event ring state */
 	evt_ring->state = gsi_evt_ring_state(gsi, evt_ring_id);
 	if (evt_ring->state != GSI_EVT_RING_STATE_NOT_ALLOCATED) {
-		dev_err(gsi->dev, "event ring %u bad state %u before alloc\n",
+		dev_err(gsi->base.dev, "event ring %u bad state %u before alloc\n",
 			evt_ring_id, evt_ring->state);
 		return -EINVAL;
 	}
@@ -387,7 +388,7 @@ static int gsi_evt_ring_alloc_command(struct gsi *gsi, u32 evt_ring_id)
 	if (evt_ring->state == GSI_EVT_RING_STATE_ALLOCATED)
 		return 0;
 
-	dev_err(gsi->dev, "event ring %u bad state %u after alloc\n",
+	dev_err(gsi->base.dev, "event ring %u bad state %u after alloc\n",
 		evt_ring_id, evt_ring->state);
 
 	return -EIO;
@@ -401,7 +402,7 @@ static void gsi_evt_ring_reset_command(struct gsi *gsi, u32 evt_ring_id)
 
 	if (state != GSI_EVT_RING_STATE_ALLOCATED &&
 	    state != GSI_EVT_RING_STATE_ERROR) {
-		dev_err(gsi->dev, "event ring %u bad state %u before reset\n",
+		dev_err(gsi->base.dev, "event ring %u bad state %u before reset\n",
 			evt_ring_id, evt_ring->state);
 		return;
 	}
@@ -412,7 +413,7 @@ static void gsi_evt_ring_reset_command(struct gsi *gsi, u32 evt_ring_id)
 	if (evt_ring->state == GSI_EVT_RING_STATE_ALLOCATED)
 		return;
 
-	dev_err(gsi->dev, "event ring %u bad state %u after reset\n",
+	dev_err(gsi->base.dev, "event ring %u bad state %u after reset\n",
 		evt_ring_id, evt_ring->state);
 }
 
@@ -422,7 +423,7 @@ static void gsi_evt_ring_de_alloc_command(struct gsi *gsi, u32 evt_ring_id)
 	struct gsi_evt_ring *evt_ring = &gsi->evt_ring[evt_ring_id];
 
 	if (evt_ring->state != GSI_EVT_RING_STATE_ALLOCATED) {
-		dev_err(gsi->dev, "event ring %u state %u before dealloc\n",
+		dev_err(gsi->base.dev, "event ring %u state %u before dealloc\n",
 			evt_ring_id, evt_ring->state);
 		return;
 	}
@@ -433,15 +434,16 @@ static void gsi_evt_ring_de_alloc_command(struct gsi *gsi, u32 evt_ring_id)
 	if (evt_ring->state == GSI_EVT_RING_STATE_NOT_ALLOCATED)
 		return;
 
-	dev_err(gsi->dev, "event ring %u bad state %u after dealloc\n",
+	dev_err(gsi->base.dev, "event ring %u bad state %u after dealloc\n",
 		evt_ring_id, evt_ring->state);
 }
 
 /* Fetch the current state of a channel from hardware */
-static enum gsi_channel_state gsi_channel_state(struct gsi_channel *channel)
+static enum gsi_channel_state gsi_channel_state(struct ipa_channel *channel)
 {
 	u32 channel_id = gsi_channel_id(channel);
-	void __iomem *virt = channel->gsi->virt;
+	struct gsi *gsi = to_gsi(channel->transport);
+	void __iomem *virt = gsi->virt;
 	u32 val;
 
 	val = ioread32(virt + GSI_CH_C_CNTXT_0_OFFSET(channel_id));
@@ -451,12 +453,12 @@ static enum gsi_channel_state gsi_channel_state(struct gsi_channel *channel)
 
 /* Issue a channel command and wait for it to complete */
 static void
-gsi_channel_command(struct gsi_channel *channel, enum gsi_ch_cmd_opcode opcode)
+gsi_channel_command(struct ipa_channel *channel, enum gsi_ch_cmd_opcode opcode)
 {
 	struct completion *completion = &channel->completion;
 	u32 channel_id = gsi_channel_id(channel);
-	struct gsi *gsi = channel->gsi;
-	struct device *dev = gsi->dev;
+	struct gsi *gsi = to_gsi(channel->transport);
+	struct device *dev = gsi->base.dev;
 	bool success;
 	u32 val;
 
@@ -494,8 +496,8 @@ gsi_channel_command(struct gsi_channel *channel, enum gsi_ch_cmd_opcode opcode)
 /* Allocate GSI channel in NOT_ALLOCATED state */
 static int gsi_channel_alloc_command(struct gsi *gsi, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
-	struct device *dev = gsi->dev;
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct device *dev = gsi->base.dev;
 	enum gsi_channel_state state;
 
 	/* Get initial channel state */
@@ -520,9 +522,9 @@ static int gsi_channel_alloc_command(struct gsi *gsi, u32 channel_id)
 }
 
 /* Start an ALLOCATED channel */
-static int gsi_channel_start_command(struct gsi_channel *channel)
+static int gsi_channel_start_command(struct ipa_channel *channel)
 {
-	struct device *dev = channel->gsi->dev;
+	struct device *dev = channel->transport->dev;
 	enum gsi_channel_state state;
 
 	state = gsi_channel_state(channel);
@@ -547,9 +549,9 @@ static int gsi_channel_start_command(struct gsi_channel *channel)
 }
 
 /* Stop a GSI channel in STARTED state */
-static int gsi_channel_stop_command(struct gsi_channel *channel)
+static int gsi_channel_stop_command(struct ipa_channel *channel)
 {
-	struct device *dev = channel->gsi->dev;
+	struct device *dev = channel->transport->dev;
 	enum gsi_channel_state state;
 
 	state = gsi_channel_state(channel);
@@ -585,9 +587,9 @@ static int gsi_channel_stop_command(struct gsi_channel *channel)
 }
 
 /* Reset a GSI channel in ALLOCATED or ERROR state. */
-static void gsi_channel_reset_command(struct gsi_channel *channel)
+static void gsi_channel_reset_command(struct ipa_channel *channel)
 {
-	struct device *dev = channel->gsi->dev;
+	struct device *dev = channel->transport->dev;
 	enum gsi_channel_state state;
 
 	msleep(1);	/* A short delay is required before a RESET command */
@@ -614,8 +616,8 @@ static void gsi_channel_reset_command(struct gsi_channel *channel)
 /* Deallocate an ALLOCATED GSI channel */
 static void gsi_channel_de_alloc_command(struct gsi *gsi, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
-	struct device *dev = gsi->dev;
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct device *dev = gsi->base.dev;
 	enum gsi_channel_state state;
 
 	state = gsi_channel_state(channel);
@@ -697,7 +699,7 @@ static void gsi_evt_ring_program(struct gsi *gsi, u32 evt_ring_id)
 }
 
 /* Return the last (most recent) transaction completed on a channel. */
-static struct ipa_trans *gsi_channel_trans_last(struct gsi_channel *channel)
+static struct ipa_trans *gsi_channel_trans_last(struct ipa_channel *channel)
 {
 	struct ipa_trans_info *trans_info = &channel->trans_info;
 	struct ipa_trans *trans;
@@ -723,7 +725,7 @@ static struct ipa_trans *gsi_channel_trans_last(struct gsi_channel *channel)
 }
 
 /* Wait for transaction activity on a channel to complete */
-static void gsi_channel_trans_quiesce(struct gsi_channel *channel)
+static void gsi_channel_trans_quiesce(struct ipa_channel *channel)
 {
 	struct ipa_trans *trans;
 
@@ -736,42 +738,47 @@ static void gsi_channel_trans_quiesce(struct gsi_channel *channel)
 }
 
 /* Stop channel activity.  Transactions may not be allocated until thawed. */
-static void gsi_channel_freeze(struct gsi_channel *channel)
+static void gsi_channel_freeze(struct ipa_channel *channel)
 {
+	struct gsi_channel_priv *priv = channel->priv;
+
 	gsi_channel_trans_quiesce(channel);
 
 	napi_disable(&channel->napi);
 
-	gsi_irq_ieob_disable(channel->gsi, channel->evt_ring_id);
+	gsi_irq_ieob_disable(to_gsi(channel->transport), priv->evt_ring_id);
 }
 
 /* Allow transactions to be used on the channel again. */
-static void gsi_channel_thaw(struct gsi_channel *channel)
+static void gsi_channel_thaw(struct ipa_channel *channel)
 {
-	gsi_irq_ieob_enable(channel->gsi, channel->evt_ring_id);
+	struct gsi_channel_priv *priv = channel->priv;
+
+	gsi_irq_ieob_enable(to_gsi(channel->transport), priv->evt_ring_id);
 
 	napi_enable(&channel->napi);
 }
 
 /* Program a channel for use */
-static void gsi_channel_program(struct gsi_channel *channel, bool doorbell)
+static void gsi_channel_program(struct ipa_channel *channel, bool doorbell)
 {
-	size_t size = channel->tre_ring.count * GSI_RING_ELEMENT_SIZE;
+	struct gsi_channel_priv *priv = channel->priv;
+	size_t size = priv->tre_ring.count * GSI_RING_ELEMENT_SIZE;
 	u32 channel_id = gsi_channel_id(channel);
 	union gsi_channel_scratch scr = { };
 	struct gsi_channel_scratch_gpi *gpi;
-	struct gsi *gsi = channel->gsi;
+	struct gsi *gsi = to_gsi(channel->transport);
 	u32 wrr_weight = 0;
 	u32 val;
 
 	/* Arbitrarily pick TRE 0 as the first channel element to use */
-	channel->tre_ring.index = 0;
+	priv->tre_ring.index = 0;
 
 	/* We program all channels as GPI type/protocol */
 	val = u32_encode_bits(GSI_CHANNEL_TYPE_GPI, CHTYPE_PROTOCOL_FMASK);
 	if (channel->toward_ipa)
 		val |= CHTYPE_DIR_FMASK;
-	val |= u32_encode_bits(channel->evt_ring_id, ERINDEX_FMASK);
+	val |= u32_encode_bits(priv->evt_ring_id, ERINDEX_FMASK);
 	val |= u32_encode_bits(GSI_RING_ELEMENT_SIZE, ELEMENT_SIZE_FMASK);
 	iowrite32(val, gsi->virt + GSI_CH_C_CNTXT_0_OFFSET(channel_id));
 
@@ -782,10 +789,10 @@ static void gsi_channel_program(struct gsi_channel *channel, bool doorbell)
 	 * high-order 32 bits of the address of the channel ring,
 	 * respectively.
 	 */
-	val = channel->tre_ring.addr & GENMASK(31, 0);
+	val = priv->tre_ring.addr & GENMASK(31, 0);
 	iowrite32(val, gsi->virt + GSI_CH_C_CNTXT_2_OFFSET(channel_id));
 
-	val = channel->tre_ring.addr >> 32;
+	val = priv->tre_ring.addr >> 32;
 	iowrite32(val, gsi->virt + GSI_CH_C_CNTXT_3_OFFSET(channel_id));
 
 	/* Command channel gets low weighted round-robin priority */
@@ -796,15 +803,15 @@ static void gsi_channel_program(struct gsi_channel *channel, bool doorbell)
 	/* Max prefetch is 1 segment (do not set MAX_PREFETCH_FMASK) */
 
 	/* We enable the doorbell engine for IPA v3.5.1 */
-	if (gsi->version == IPA_VERSION_3_5_1 && doorbell)
+	if (gsi->base.version == IPA_VERSION_3_5_1 && doorbell)
 		val |= USE_DB_ENG_FMASK;
 
 	/* v4.0 introduces an escape buffer for prefetch.  We use it
 	 * on all but the AP command channel.
 	 */
-	if (gsi->version != IPA_VERSION_3_5_1 && !channel->command) {
+	if (gsi->base.version != IPA_VERSION_3_5_1 && !channel->command) {
 		/* If not otherwise set, prefetch buffers are used */
-		if (gsi->version < IPA_VERSION_4_5)
+		if (gsi->base.version < IPA_VERSION_4_5)
 			val |= USE_ESCAPE_BUF_ONLY_FMASK;
 		else
 			val |= u32_encode_bits(GSI_ESCAPE_BUF_ONLY,
@@ -815,8 +822,8 @@ static void gsi_channel_program(struct gsi_channel *channel, bool doorbell)
 
 	/* Now update the scratch registers for GPI protocol */
 	gpi = &scr.gpi;
-	gpi->max_outstanding_tre = gsi_channel_trans_tre_max(gsi, channel_id) *
-					GSI_RING_ELEMENT_SIZE;
+	gpi->max_outstanding_tre = ipa_channel_trans_tre_max(&gsi->base,
+						channel_id) * GSI_RING_ELEMENT_SIZE;
 	gpi->outstanding_threshold = 2 * GSI_RING_ELEMENT_SIZE;
 
 	val = scr.data.word1;
@@ -839,22 +846,23 @@ static void gsi_channel_program(struct gsi_channel *channel, bool doorbell)
 	/* All done! */
 }
 
-static void gsi_channel_deprogram(struct gsi_channel *channel)
+static void gsi_channel_deprogram(struct ipa_channel *channel)
 {
 	/* Nothing to do */
 }
 
 /* Start an allocated GSI channel */
-int gsi_channel_start(struct gsi *gsi, u32 channel_id)
+int gsi_channel_start(struct ipa_transport *transport, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct gsi *gsi = to_gsi(transport);
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
 	int ret;
 
-	mutex_lock(&gsi->mutex);
+	mutex_lock(&gsi->base.mutex);
 
 	ret = gsi_channel_start_command(channel);
 
-	mutex_unlock(&gsi->mutex);
+	mutex_unlock(&gsi->base.mutex);
 
 	gsi_channel_thaw(channel);
 
@@ -862,9 +870,10 @@ int gsi_channel_start(struct gsi *gsi, u32 channel_id)
 }
 
 /* Stop a started channel */
-int gsi_channel_stop(struct gsi *gsi, u32 channel_id)
+int gsi_channel_stop(struct ipa_transport *transport, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct gsi *gsi = to_gsi(transport);
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
 	u32 retries;
 	int ret;
 
@@ -873,7 +882,7 @@ int gsi_channel_stop(struct gsi *gsi, u32 channel_id)
 	/* RX channels might require a little time to enter STOPPED state */
 	retries = channel->toward_ipa ? 0 : GSI_CHANNEL_STOP_RX_RETRIES;
 
-	mutex_lock(&gsi->mutex);
+	mutex_lock(&gsi->base.mutex);
 
 	do {
 		ret = gsi_channel_stop_command(channel);
@@ -882,7 +891,7 @@ int gsi_channel_stop(struct gsi *gsi, u32 channel_id)
 		msleep(1);
 	} while (retries--);
 
-	mutex_unlock(&gsi->mutex);
+	mutex_unlock(&gsi->base.mutex);
 
 	/* Thaw the channel if we need to retry (or on error) */
 	if (ret)
@@ -892,30 +901,30 @@ int gsi_channel_stop(struct gsi *gsi, u32 channel_id)
 }
 
 /* Reset and reconfigure a channel, (possibly) enabling the doorbell engine */
-void gsi_channel_reset(struct gsi *gsi, u32 channel_id, bool doorbell)
+void gsi_channel_reset(struct ipa_transport *transport, u32 channel_id, bool doorbell)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct ipa_channel *channel = &transport->channel[channel_id];
 
-	mutex_lock(&gsi->mutex);
+	mutex_lock(&transport->mutex);
 
 	gsi_channel_reset_command(channel);
 	/* Due to a hardware quirk we may need to reset RX channels twice. */
-	if (gsi->version == IPA_VERSION_3_5_1 && !channel->toward_ipa)
+	if (transport->version == IPA_VERSION_3_5_1 && !channel->toward_ipa)
 		gsi_channel_reset_command(channel);
 
 	gsi_channel_program(channel, doorbell);
 	gsi_channel_trans_cancel_pending(channel);
 
-	mutex_unlock(&gsi->mutex);
+	mutex_unlock(&transport->mutex);
 }
 
 /* Stop a STARTED channel for suspend (using stop if requested) */
-int gsi_channel_suspend(struct gsi *gsi, u32 channel_id, bool stop)
+int gsi_channel_suspend(struct ipa_transport *transport, u32 channel_id, bool stop)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct ipa_channel *channel = &transport->channel[channel_id];
 
 	if (stop)
-		return gsi_channel_stop(gsi, channel_id);
+		return gsi_channel_stop(transport, channel_id);
 
 	gsi_channel_freeze(channel);
 
@@ -923,12 +932,12 @@ int gsi_channel_suspend(struct gsi *gsi, u32 channel_id, bool stop)
 }
 
 /* Resume a suspended channel (starting will be requested if STOPPED) */
-int gsi_channel_resume(struct gsi *gsi, u32 channel_id, bool start)
+int gsi_channel_resume(struct ipa_transport *transport, u32 channel_id, bool start)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct ipa_channel *channel = &transport->channel[channel_id];
 
 	if (start)
-		return gsi_channel_start(gsi, channel_id);
+		return gsi_channel_start(transport, channel_id);
 
 	gsi_channel_thaw(channel);
 
@@ -953,7 +962,7 @@ int gsi_channel_resume(struct gsi *gsi, u32 channel_id, bool start)
  * provide accurate information to the network stack about how much
  * work we've given the hardware at any point in time.
  */
-void gsi_channel_tx_queued(struct gsi_channel *channel)
+void gsi_channel_tx_queued(struct ipa_channel *channel)
 {
 	u32 trans_count;
 	u32 byte_count;
@@ -963,8 +972,8 @@ void gsi_channel_tx_queued(struct gsi_channel *channel)
 	channel->queued_byte_count = channel->byte_count;
 	channel->queued_trans_count = channel->trans_count;
 
-	ipa_gsi_channel_tx_queued(channel->gsi, gsi_channel_id(channel),
-				  trans_count, byte_count);
+	ipa_transport_channel_tx_queued(channel->transport, gsi_channel_id(channel),
+					trans_count, byte_count);
 }
 
 /**
@@ -992,7 +1001,7 @@ void gsi_channel_tx_queued(struct gsi_channel *channel)
  * point in time.
  */
 static void
-gsi_channel_tx_update(struct gsi_channel *channel, struct ipa_trans *trans)
+gsi_channel_tx_update(struct ipa_channel *channel, struct ipa_trans *trans)
 {
 	u64 byte_count = trans->byte_count + trans->len;
 	u64 trans_count = trans->trans_count + 1;
@@ -1002,8 +1011,8 @@ gsi_channel_tx_update(struct gsi_channel *channel, struct ipa_trans *trans)
 	trans_count -= channel->compl_trans_count;
 	channel->compl_trans_count += trans_count;
 
-	ipa_gsi_channel_tx_completed(channel->gsi, gsi_channel_id(channel),
-				     trans_count, byte_count);
+	ipa_transport_channel_tx_completed(channel->transport, gsi_channel_id(channel),
+					   trans_count, byte_count);
 }
 
 /* Channel control interrupt handler */
@@ -1016,11 +1025,11 @@ static void gsi_isr_chan_ctrl(struct gsi *gsi)
 
 	while (channel_mask) {
 		u32 channel_id = __ffs(channel_mask);
-		struct gsi_channel *channel;
+		struct ipa_channel *channel;
 
 		channel_mask ^= BIT(channel_id);
 
-		channel = &gsi->channel[channel_id];
+		channel = &gsi->base.channel[channel_id];
 
 		complete(&channel->completion);
 	}
@@ -1052,13 +1061,13 @@ static void
 gsi_isr_glob_chan_err(struct gsi *gsi, u32 err_ee, u32 channel_id, u32 code)
 {
 	if (code == GSI_OUT_OF_RESOURCES) {
-		dev_err(gsi->dev, "channel %u out of resources\n", channel_id);
-		complete(&gsi->channel[channel_id].completion);
+		dev_err(gsi->base.dev, "channel %u out of resources\n", channel_id);
+		complete(&gsi->base.channel[channel_id].completion);
 		return;
 	}
 
 	/* Report, but otherwise ignore all other error codes */
-	dev_err(gsi->dev, "channel %u global error ee 0x%08x code 0x%08x\n",
+	dev_err(gsi->base.dev, "channel %u global error ee 0x%08x code 0x%08x\n",
 		channel_id, err_ee, code);
 }
 
@@ -1071,13 +1080,13 @@ gsi_isr_glob_evt_err(struct gsi *gsi, u32 err_ee, u32 evt_ring_id, u32 code)
 		u32 channel_id = gsi_channel_id(evt_ring->channel);
 
 		complete(&evt_ring->completion);
-		dev_err(gsi->dev, "evt_ring for channel %u out of resources\n",
+		dev_err(gsi->base.dev, "evt_ring for channel %u out of resources\n",
 			channel_id);
 		return;
 	}
 
 	/* Report, but otherwise ignore all other error codes */
-	dev_err(gsi->dev, "event ring %u global error ee %u code 0x%08x\n",
+	dev_err(gsi->base.dev, "event ring %u global error ee %u code 0x%08x\n",
 		evt_ring_id, err_ee, code);
 }
 
@@ -1105,7 +1114,7 @@ static void gsi_isr_glob_err(struct gsi *gsi)
 	else if (type == GSI_ERR_TYPE_EVT)
 		gsi_isr_glob_evt_err(gsi, ee, which, code);
 	else	/* type GSI_ERR_TYPE_GLOB should be fatal */
-		dev_err(gsi->dev, "unexpected global error 0x%08x\n", type);
+		dev_err(gsi->base.dev, "unexpected global error 0x%08x\n", type);
 }
 
 /* Generic EE interrupt handler */
@@ -1142,7 +1151,7 @@ static void gsi_isr_gp_int1(struct gsi *gsi)
 		break;
 
 	default:
-		dev_err(gsi->dev, "global INT1 generic result %u\n", result);
+		dev_err(gsi->base.dev, "global INT1 generic result %u\n", result);
 		gsi->result = -EIO;
 		break;
 	}
@@ -1170,7 +1179,7 @@ static void gsi_isr_glob_ee(struct gsi *gsi)
 	}
 
 	if (val)
-		dev_err(gsi->dev, "unexpected global interrupt 0x%08x\n", val);
+		dev_err(gsi->base.dev, "unexpected global interrupt 0x%08x\n", val);
 }
 
 /* I/O completion interrupt event */
@@ -1194,7 +1203,7 @@ static void gsi_isr_ieob(struct gsi *gsi)
 /* General event interrupts represent serious problems, so report them */
 static void gsi_isr_general(struct gsi *gsi)
 {
-	struct device *dev = gsi->dev;
+	struct device *dev = gsi->base.dev;
 	u32 val;
 
 	val = ioread32(gsi->virt + GSI_CNTXT_GSI_IRQ_STTS_OFFSET);
@@ -1242,7 +1251,7 @@ static irqreturn_t gsi_isr(int irq, void *dev_id)
 				gsi_isr_general(gsi);
 				break;
 			default:
-				dev_err(gsi->dev,
+				dev_err(gsi->base.dev,
 					"unrecognized interrupt type 0x%08x\n",
 					gsi_intr);
 				break;
@@ -1250,7 +1259,7 @@ static irqreturn_t gsi_isr(int irq, void *dev_id)
 		} while (intr_mask);
 
 		if (++cnt > GSI_ISR_MAX_ITER) {
-			dev_err(gsi->dev, "interrupt flood\n");
+			dev_err(gsi->base.dev, "interrupt flood\n");
 			break;
 		}
 	}
@@ -1287,15 +1296,16 @@ static void gsi_irq_exit(struct gsi *gsi)
 }
 
 /* Return the transaction associated with a transfer completion event */
-static struct ipa_trans *gsi_event_trans(struct gsi_channel *channel,
+static struct ipa_trans *gsi_event_trans(struct ipa_channel *channel,
 					 struct gsi_event *event)
 {
+	struct gsi_channel_priv *priv = channel->priv;
 	u32 tre_offset;
 	u32 tre_index;
 
 	/* Event xfer_ptr records the TRE it's associated with */
 	tre_offset = le64_to_cpu(event->xfer_ptr) & GENMASK(31, 0);
-	tre_index = gsi_ring_index(&channel->tre_ring, tre_offset);
+	tre_index = gsi_ring_index(&priv->tre_ring, tre_offset);
 
 	return gsi_channel_trans_mapped(channel, tre_index);
 }
@@ -1321,7 +1331,7 @@ static struct ipa_trans *gsi_event_trans(struct gsi_channel *channel,
  */
 static void gsi_evt_ring_rx_update(struct gsi_evt_ring *evt_ring, u32 index)
 {
-	struct gsi_channel *channel = evt_ring->channel;
+	struct ipa_channel *channel = evt_ring->channel;
 	struct gsi_ring *ring = &evt_ring->ring;
 	struct ipa_trans_info *trans_info;
 	struct gsi_event *event_done;
@@ -1368,7 +1378,7 @@ static void gsi_evt_ring_rx_update(struct gsi_evt_ring *evt_ring, u32 index)
 static int gsi_ring_alloc(struct gsi *gsi, struct gsi_ring *ring, u32 count)
 {
 	size_t size = count * GSI_RING_ELEMENT_SIZE;
-	struct device *dev = gsi->dev;
+	struct device *dev = gsi->base.dev;
 	dma_addr_t addr;
 
 	/* Hardware requires a 2^n ring size, with alignment equal to size */
@@ -1392,7 +1402,7 @@ static void gsi_ring_free(struct gsi *gsi, struct gsi_ring *ring)
 {
 	size_t size = ring->count * GSI_RING_ELEMENT_SIZE;
 
-	dma_free_coherent(gsi->dev, size, ring->virt, ring->addr);
+	dma_free_coherent(gsi->base.dev, size, ring->virt, ring->addr);
 }
 
 /* Allocate an available event ring id */
@@ -1401,7 +1411,7 @@ static int gsi_evt_ring_id_alloc(struct gsi *gsi)
 	u32 evt_ring_id;
 
 	if (gsi->event_bitmap == ~0U) {
-		dev_err(gsi->dev, "event rings exhausted\n");
+		dev_err(gsi->base.dev, "event rings exhausted\n");
 		return -ENOSPC;
 	}
 
@@ -1418,11 +1428,12 @@ static void gsi_evt_ring_id_free(struct gsi *gsi, u32 evt_ring_id)
 }
 
 /* Ring a channel doorbell, reporting the first un-filled entry */
-void gsi_channel_doorbell(struct gsi_channel *channel)
+void gsi_channel_doorbell(struct ipa_channel *channel)
 {
-	struct gsi_ring *tre_ring = &channel->tre_ring;
+	struct gsi_channel_priv *priv = channel->priv;
+	struct gsi_ring *tre_ring = &priv->tre_ring;
 	u32 channel_id = gsi_channel_id(channel);
-	struct gsi *gsi = channel->gsi;
+	struct gsi *gsi = to_gsi(channel->transport);
 	u32 val;
 
 	/* Note: index *must* be used modulo the ring count here */
@@ -1431,10 +1442,11 @@ void gsi_channel_doorbell(struct gsi_channel *channel)
 }
 
 /* Consult hardware, move any newly completed transactions to completed list */
-static void gsi_channel_update(struct gsi_channel *channel)
+static void gsi_channel_update(struct ipa_channel *channel)
 {
-	u32 evt_ring_id = channel->evt_ring_id;
-	struct gsi *gsi = channel->gsi;
+	struct gsi_channel_priv *priv = channel->priv;
+	u32 evt_ring_id = priv->evt_ring_id;
+	struct gsi *gsi = to_gsi(channel->transport);
 	struct gsi_evt_ring *evt_ring;
 	struct ipa_trans *trans;
 	struct gsi_ring *ring;
@@ -1472,7 +1484,7 @@ static void gsi_channel_update(struct gsi_channel *channel)
 	ipa_trans_move_complete(trans);
 
 	/* Tell the hardware we've handled these events */
-	gsi_evt_ring_doorbell(channel->gsi, channel->evt_ring_id, index);
+	gsi_evt_ring_doorbell(gsi, priv->evt_ring_id, index);
 
 	ipa_trans_free(trans);
 }
@@ -1489,7 +1501,7 @@ static void gsi_channel_update(struct gsi_channel *channel)
  * completed list and the new first entry is returned.  If there are no more
  * completed transactions, a null pointer is returned.
  */
-static struct ipa_trans *gsi_channel_poll_one(struct gsi_channel *channel)
+static struct ipa_trans *gsi_channel_poll_one(struct ipa_channel *channel)
 {
 	struct ipa_trans *trans;
 
@@ -1521,10 +1533,11 @@ static struct ipa_trans *gsi_channel_poll_one(struct gsi_channel *channel)
  */
 static int gsi_channel_poll(struct napi_struct *napi, int budget)
 {
-	struct gsi_channel *channel;
+	struct ipa_channel *channel = container_of(napi, struct ipa_channel, napi);
+	struct gsi *gsi = to_gsi(channel->transport);
+	struct gsi_channel_priv *priv = channel->priv;
 	int count = 0;
 
-	channel = container_of(napi, struct gsi_channel, napi);
 	while (count < budget) {
 		struct ipa_trans *trans;
 
@@ -1537,7 +1550,7 @@ static int gsi_channel_poll(struct napi_struct *napi, int budget)
 
 	if (count < budget) {
 		napi_complete(&channel->napi);
-		gsi_irq_ieob_enable(channel->gsi, channel->evt_ring_id);
+		gsi_irq_ieob_enable(gsi, priv->evt_ring_id);
 	}
 
 	return count;
@@ -1572,11 +1585,12 @@ static void gsi_evt_ring_teardown(struct gsi *gsi)
 /* Setup function for a single channel */
 static int gsi_channel_setup_one(struct gsi *gsi, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
-	u32 evt_ring_id = channel->evt_ring_id;
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
+	u32 evt_ring_id = priv->evt_ring_id;
 	int ret;
 
-	if (!channel->gsi)
+	if (!channel->transport)
 		return 0;	/* Ignore uninitialized channels */
 
 	ret = gsi_evt_ring_alloc_command(gsi, evt_ring_id);
@@ -1592,10 +1606,10 @@ static int gsi_channel_setup_one(struct gsi *gsi, u32 channel_id)
 	gsi_channel_program(channel, true);
 
 	if (channel->toward_ipa)
-		netif_tx_napi_add(&gsi->dummy_dev, &channel->napi,
+		netif_tx_napi_add(&gsi->base.dummy_dev, &channel->napi,
 				  gsi_channel_poll, NAPI_POLL_WEIGHT);
 	else
-		netif_napi_add(&gsi->dummy_dev, &channel->napi,
+		netif_napi_add(&gsi->base.dummy_dev, &channel->napi,
 			       gsi_channel_poll, NAPI_POLL_WEIGHT);
 
 	return 0;
@@ -1610,10 +1624,11 @@ err_evt_ring_de_alloc:
 /* Inverse of gsi_channel_setup_one() */
 static void gsi_channel_teardown_one(struct gsi *gsi, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
-	u32 evt_ring_id = channel->evt_ring_id;
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
+	u32 evt_ring_id = priv->evt_ring_id;
 
-	if (!channel->gsi)
+	if (!channel->transport)
 		return;		/* Ignore uninitialized channels */
 
 	netif_napi_del(&channel->napi);
@@ -1659,7 +1674,7 @@ static int gsi_generic_command(struct gsi *gsi, u32 channel_id,
 	if (success)
 		return gsi->result;
 
-	dev_err(gsi->dev, "GSI generic command %u to channel %u timed out\n",
+	dev_err(gsi->base.dev, "GSI generic command %u to channel %u timed out\n",
 		opcode, channel_id);
 
 	return -ETIMEDOUT;
@@ -1682,7 +1697,7 @@ static void gsi_modem_channel_halt(struct gsi *gsi, u32 channel_id)
 	while (ret == -EAGAIN && retries--);
 
 	if (ret)
-		dev_err(gsi->dev, "error %d halting modem channel %u\n",
+		dev_err(gsi->base.dev, "error %d halting modem channel %u\n",
 			ret, channel_id);
 }
 
@@ -1696,25 +1711,25 @@ static int gsi_channel_setup(struct gsi *gsi)
 	gsi_evt_ring_setup(gsi);
 	gsi_irq_enable(gsi);
 
-	mutex_lock(&gsi->mutex);
+	mutex_lock(&gsi->base.mutex);
 
 	do {
 		ret = gsi_channel_setup_one(gsi, channel_id);
 		if (ret)
 			goto err_unwind;
-	} while (++channel_id < gsi->channel_count);
+	} while (++channel_id < gsi->base.channel_count);
 
 	/* Make sure no channels were defined that hardware does not support */
 	while (channel_id < GSI_CHANNEL_COUNT_MAX) {
-		struct gsi_channel *channel = &gsi->channel[channel_id++];
+		struct ipa_channel *channel = &gsi->base.channel[channel_id++];
 
-		if (!channel->gsi)
+		if (!channel->transport)
 			continue;	/* Ignore uninitialized channels */
 
 		ret = -EINVAL;
-		dev_err(gsi->dev, "channel %u not supported by hardware\n",
+		dev_err(gsi->base.dev, "channel %u not supported by hardware\n",
 			channel_id - 1);
-		channel_id = gsi->channel_count;
+		channel_id = gsi->base.channel_count;
 		goto err_unwind;
 	}
 
@@ -1731,7 +1746,7 @@ static int gsi_channel_setup(struct gsi *gsi)
 		mask ^= BIT(modem_channel_id);
 	}
 
-	mutex_unlock(&gsi->mutex);
+	mutex_unlock(&gsi->base.mutex);
 
 	return 0;
 
@@ -1750,7 +1765,7 @@ err_unwind:
 	while (channel_id--)
 		gsi_channel_teardown_one(gsi, channel_id);
 
-	mutex_unlock(&gsi->mutex);
+	mutex_unlock(&gsi->base.mutex);
 
 	gsi_irq_disable(gsi);
 	gsi_evt_ring_teardown(gsi);
@@ -1764,7 +1779,7 @@ static void gsi_channel_teardown(struct gsi *gsi)
 	u32 mask = gsi->modem_channel_bitmap;
 	u32 channel_id;
 
-	mutex_lock(&gsi->mutex);
+	mutex_lock(&gsi->base.mutex);
 
 	while (mask) {
 		channel_id = __fls(mask);
@@ -1774,21 +1789,22 @@ static void gsi_channel_teardown(struct gsi *gsi)
 		gsi_modem_channel_halt(gsi, channel_id);
 	}
 
-	channel_id = gsi->channel_count - 1;
+	channel_id = gsi->base.channel_count - 1;
 	do
 		gsi_channel_teardown_one(gsi, channel_id);
 	while (channel_id--);
 
-	mutex_unlock(&gsi->mutex);
+	mutex_unlock(&gsi->base.mutex);
 
 	gsi_irq_disable(gsi);
 	gsi_evt_ring_teardown(gsi);
 }
 
 /* Setup function for GSI.  GSI firmware must be loaded and initialized */
-int gsi_setup(struct gsi *gsi)
+int gsi_setup(struct ipa_transport *transport)
 {
-	struct device *dev = gsi->dev;
+	struct gsi *gsi = to_gsi(transport);
+	struct device *dev = gsi->base.dev;
 	u32 val;
 	int ret;
 
@@ -1803,16 +1819,16 @@ int gsi_setup(struct gsi *gsi)
 
 	val = ioread32(gsi->virt + GSI_GSI_HW_PARAM_2_OFFSET);
 
-	gsi->channel_count = u32_get_bits(val, NUM_CH_PER_EE_FMASK);
-	if (!gsi->channel_count) {
+	gsi->base.channel_count = u32_get_bits(val, NUM_CH_PER_EE_FMASK);
+	if (!gsi->base.channel_count) {
 		dev_err(dev, "GSI reports zero channels supported\n");
 		return -EINVAL;
 	}
-	if (gsi->channel_count > GSI_CHANNEL_COUNT_MAX) {
+	if (gsi->base.channel_count > GSI_CHANNEL_COUNT_MAX) {
 		dev_warn(dev,
 			 "limiting to %u channels; hardware supports %u\n",
-			 GSI_CHANNEL_COUNT_MAX, gsi->channel_count);
-		gsi->channel_count = GSI_CHANNEL_COUNT_MAX;
+			 GSI_CHANNEL_COUNT_MAX, gsi->base.channel_count);
+		gsi->base.channel_count = GSI_CHANNEL_COUNT_MAX;
 	}
 
 	gsi->evt_ring_count = u32_get_bits(val, NUM_EV_PER_EE_FMASK);
@@ -1841,44 +1857,48 @@ int gsi_setup(struct gsi *gsi)
 }
 
 /* Inverse of gsi_setup() */
-void gsi_teardown(struct gsi *gsi)
+void gsi_teardown(struct ipa_transport *transport)
 {
+	struct gsi *gsi = to_gsi(transport);
+
 	gsi_channel_teardown(gsi);
 	gsi_irq_teardown(gsi);
 }
 
 /* Initialize a channel's event ring */
-static int gsi_channel_evt_ring_init(struct gsi_channel *channel)
+static int gsi_channel_evt_ring_init(struct ipa_channel *channel)
 {
-	struct gsi *gsi = channel->gsi;
+	struct gsi *gsi = to_gsi(channel->transport);
+	struct gsi_channel_priv *priv = channel->priv;
 	struct gsi_evt_ring *evt_ring;
 	int ret;
 
 	ret = gsi_evt_ring_id_alloc(gsi);
 	if (ret < 0)
 		return ret;
-	channel->evt_ring_id = ret;
+	priv->evt_ring_id = ret;
 
-	evt_ring = &gsi->evt_ring[channel->evt_ring_id];
+	evt_ring = &gsi->evt_ring[priv->evt_ring_id];
 	evt_ring->channel = channel;
 
-	ret = gsi_ring_alloc(gsi, &evt_ring->ring, channel->event_count);
+	ret = gsi_ring_alloc(gsi, &evt_ring->ring, priv->event_count);
 	if (!ret)
 		return 0;	/* Success! */
 
-	dev_err(gsi->dev, "error %d allocating channel %u event ring\n",
+	dev_err(gsi->base.dev, "error %d allocating channel %u event ring\n",
 		ret, gsi_channel_id(channel));
 
-	gsi_evt_ring_id_free(gsi, channel->evt_ring_id);
+	gsi_evt_ring_id_free(gsi, priv->evt_ring_id);
 
 	return ret;
 }
 
 /* Inverse of gsi_channel_evt_ring_init() */
-static void gsi_channel_evt_ring_exit(struct gsi_channel *channel)
+static void gsi_channel_evt_ring_exit(struct ipa_channel *channel)
 {
-	u32 evt_ring_id = channel->evt_ring_id;
-	struct gsi *gsi = channel->gsi;
+	struct gsi_channel_priv *priv = channel->priv;
+	u32 evt_ring_id = priv->evt_ring_id;
+	struct gsi *gsi = to_gsi(channel->transport);
 	struct gsi_evt_ring *evt_ring;
 
 	evt_ring = &gsi->evt_ring[evt_ring_id];
@@ -1909,7 +1929,7 @@ static bool gsi_channel_data_valid(struct gsi *gsi,
 {
 #ifdef IPA_VALIDATION
 	u32 channel_id = data->channel_id;
-	struct device *dev = gsi->dev;
+	struct device *dev = gsi->base.dev;
 
 	/* Make sure channel ids are in the range driver supports */
 	if (channel_id >= GSI_CHANNEL_COUNT_MAX) {
@@ -1963,7 +1983,8 @@ static int gsi_channel_init_one(struct gsi *gsi,
 				const struct ipa_gsi_endpoint_data *data,
 				bool command)
 {
-	struct gsi_channel *channel;
+	struct ipa_channel *channel;
+	struct gsi_channel_priv *priv;
 	u32 tre_count;
 	int ret;
 
@@ -1973,30 +1994,31 @@ static int gsi_channel_init_one(struct gsi *gsi,
 	/* Worst case we need an event for every outstanding TRE */
 	if (data->channel.tre_count > data->channel.event_count) {
 		tre_count = data->channel.event_count;
-		dev_warn(gsi->dev, "channel %u limited to %u TREs\n",
+		dev_warn(gsi->base.dev, "channel %u limited to %u TREs\n",
 			 data->channel_id, tre_count);
 	} else {
 		tre_count = data->channel.tre_count;
 	}
 
-	channel = &gsi->channel[data->channel_id];
+	channel = &gsi->base.channel[data->channel_id];
+	priv = channel->priv;
 	memset(channel, 0, sizeof(*channel));
 
-	channel->gsi = gsi;
+	channel->transport = &gsi->base;
 	channel->toward_ipa = data->toward_ipa;
 	channel->command = command;
-	channel->tlv_count = data->channel.tlv_count;
-	channel->tre_count = tre_count;
-	channel->event_count = data->channel.event_count;
+	priv->tlv_count = data->channel.tlv_count;
+	priv->tre_count = tre_count;
+	priv->event_count = data->channel.event_count;
 	init_completion(&channel->completion);
 
 	ret = gsi_channel_evt_ring_init(channel);
 	if (ret)
 		goto err_clear_gsi;
 
-	ret = gsi_ring_alloc(gsi, &channel->tre_ring, data->channel.tre_count);
+	ret = gsi_ring_alloc(gsi, &priv->tre_ring, data->channel.tre_count);
 	if (ret) {
-		dev_err(gsi->dev, "error %d allocating channel %u ring\n",
+		dev_err(gsi->base.dev, "error %d allocating channel %u ring\n",
 			ret, data->channel_id);
 		goto err_channel_evt_ring_exit;
 	}
@@ -2006,35 +2028,39 @@ static int gsi_channel_init_one(struct gsi *gsi,
 		goto err_ring_free;
 
 	if (command) {
-		u32 tre_max = gsi_channel_tre_max(gsi, data->channel_id);
+		u32 tre_max = ipa_channel_tre_max(&gsi->base, data->channel_id);
 
-		ret = ipa_cmd_pool_init(gsi->dev, &channel->trans_info,
-					tre_max, channel->tlv_count);
+		ret = ipa_cmd_pool_init(gsi->base.dev, &channel->trans_info,
+					tre_max, priv->tlv_count);
 	}
 	if (!ret)
 		return 0;	/* Success! */
 
 	gsi_channel_trans_exit(channel);
 err_ring_free:
-	gsi_ring_free(gsi, &channel->tre_ring);
+	gsi_ring_free(gsi, &priv->tre_ring);
 err_channel_evt_ring_exit:
 	gsi_channel_evt_ring_exit(channel);
 err_clear_gsi:
-	channel->gsi = NULL;	/* Mark it not (fully) initialized */
+	channel->transport = NULL;	/* Mark it not (fully) initialized */
 
 	return ret;
 }
 
 /* Inverse of gsi_channel_init_one() */
-static void gsi_channel_exit_one(struct gsi_channel *channel)
+static void gsi_channel_exit_one(struct ipa_channel *channel)
 {
-	if (!channel->gsi)
+	struct gsi_channel_priv *priv;
+
+	if (!channel->transport)
 		return;		/* Ignore uninitialized channels */
+
+	priv = channel->priv;
 
 	if (channel->command)
 		ipa_cmd_pool_exit(channel);
 	gsi_channel_trans_exit(channel);
-	gsi_ring_free(channel->gsi, &channel->tre_ring);
+	gsi_ring_free(to_gsi(channel->transport), &priv->tre_ring);
 	gsi_channel_evt_ring_exit(channel);
 }
 
@@ -2047,7 +2073,7 @@ static int gsi_channel_init(struct gsi *gsi, u32 count,
 	u32 i;
 
 	/* IPA v4.2 requires the AP to allocate channels for the modem */
-	modem_alloc = gsi->version == IPA_VERSION_4_2;
+	modem_alloc = gsi->base.version == IPA_VERSION_4_2;
 
 	gsi_evt_ring_init(gsi);
 
@@ -2081,7 +2107,7 @@ err_unwind:
 			gsi->modem_channel_bitmap &= ~BIT(data[i].channel_id);
 			continue;
 		}
-		gsi_channel_exit_one(&gsi->channel[data->channel_id]);
+		gsi_channel_exit_one(&gsi->base.channel[data->channel_id]);
 	}
 	gsi_evt_ring_exit(gsi);
 
@@ -2094,93 +2120,11 @@ static void gsi_channel_exit(struct gsi *gsi)
 	u32 channel_id = GSI_CHANNEL_COUNT_MAX - 1;
 
 	do
-		gsi_channel_exit_one(&gsi->channel[channel_id]);
+		gsi_channel_exit_one(&gsi->base.channel[channel_id]);
 	while (channel_id--);
 	gsi->modem_channel_bitmap = 0;
 
 	gsi_evt_ring_exit(gsi);
-}
-
-/* Init function for GSI.  GSI hardware does not need to be "ready" */
-int gsi_init(struct gsi *gsi, struct platform_device *pdev,
-	     enum ipa_version version, u32 count,
-	     const struct ipa_gsi_endpoint_data *data)
-{
-	struct device *dev = &pdev->dev;
-	struct resource *res;
-	resource_size_t size;
-	u32 adjust;
-	int ret;
-
-	gsi_validate_build();
-
-	gsi->dev = dev;
-	gsi->version = version;
-
-	/* The GSI layer performs NAPI on all endpoints.  NAPI requires a
-	 * network device structure, but the GSI layer does not have one,
-	 * so we must create a dummy network device for this purpose.
-	 */
-	init_dummy_netdev(&gsi->dummy_dev);
-
-	/* Get GSI memory range and map it */
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "gsi");
-	if (!res) {
-		dev_err(dev, "DT error getting \"gsi\" memory property\n");
-		return -ENODEV;
-	}
-
-	size = resource_size(res);
-	if (res->start > U32_MAX || size > U32_MAX - res->start) {
-		dev_err(dev, "DT memory resource \"gsi\" out of range\n");
-		return -EINVAL;
-	}
-
-	/* Make sure we can make our pointer adjustment if necessary */
-	adjust = gsi->version < IPA_VERSION_4_5 ? 0 : GSI_EE_REG_ADJUST;
-	if (res->start < adjust) {
-		dev_err(dev, "DT memory resource \"gsi\" too low (< %u)\n",
-			adjust);
-		return -EINVAL;
-	}
-
-	gsi->virt = ioremap(res->start, size);
-	if (!gsi->virt) {
-		dev_err(dev, "unable to remap \"gsi\" memory\n");
-		return -ENOMEM;
-	}
-	/* Adjust register range pointer downward for newer IPA versions */
-	gsi->virt -= adjust;
-
-	init_completion(&gsi->completion);
-
-	ret = gsi_irq_init(gsi, pdev);
-	if (ret)
-		goto err_iounmap;
-
-	ret = gsi_channel_init(gsi, count, data);
-	if (ret)
-		goto err_irq_exit;
-
-	mutex_init(&gsi->mutex);
-
-	return 0;
-
-err_irq_exit:
-	gsi_irq_exit(gsi);
-err_iounmap:
-	iounmap(gsi->virt);
-
-	return ret;
-}
-
-/* Inverse of gsi_init() */
-void gsi_exit(struct gsi *gsi)
-{
-	mutex_destroy(&gsi->mutex);
-	gsi_channel_exit(gsi);
-	gsi_irq_exit(gsi);
-	iounmap(gsi->virt);
 }
 
 /* The maximum number of outstanding TREs on a channel.  This limits
@@ -2203,18 +2147,122 @@ void gsi_exit(struct gsi *gsi)
  * substantially reduce pool memory requirements.  The number we
  * reduce it by matches the number added in ipa_trans_pool_init().
  */
-u32 gsi_channel_tre_max(struct gsi *gsi, u32 channel_id)
+static u32 gsi_channel_tre_max(struct ipa_transport *transport, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct gsi *gsi = to_gsi(transport);
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
 
 	/* Hardware limit is channel->tre_count - 1 */
-	return channel->tre_count - (channel->tlv_count - 1);
+	return priv->tre_count - (priv->tlv_count - 1);
 }
 
 /* Returns the maximum number of TREs in a single transaction for a channel */
-u32 gsi_channel_trans_tre_max(struct gsi *gsi, u32 channel_id)
+static u32 gsi_channel_trans_tre_max(struct ipa_transport *transport, u32 channel_id)
 {
-	struct gsi_channel *channel = &gsi->channel[channel_id];
+	struct gsi *gsi = to_gsi(transport);
+	struct ipa_channel *channel = &gsi->base.channel[channel_id];
+	struct gsi_channel_priv *priv = channel->priv;
 
-	return channel->tlv_count;
+	return priv->tlv_count;
+}
+
+static void gsi_exit(struct ipa_transport *transport);
+
+/* Init function for GSI.  GSI hardware does not need to be "ready" */
+struct ipa_transport* gsi_transport_init(struct platform_device *pdev,
+	     struct ipa *ipa, u32 count,
+	     const struct ipa_gsi_endpoint_data *data)
+{
+	struct device *dev = &pdev->dev;
+	struct gsi *gsi;
+	struct resource *res;
+	resource_size_t size;
+	u32 adjust;
+	int ret;
+
+	gsi_validate_build();
+
+	gsi = devm_kzalloc(&pdev->dev, sizeof(*gsi), GFP_KERNEL);
+	gsi->base.ipa = ipa;
+	gsi->base.dev = dev;
+	gsi->base.version = ipa->version;
+
+	/* The GSI layer performs NAPI on all endpoints.  NAPI requires a
+	 * network device structure, but the GSI layer does not have one,
+	 * so we must create a dummy network device for this purpose.
+	 */
+	init_dummy_netdev(&gsi->base.dummy_dev);
+
+	/* Get GSI memory range and map it */
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "gsi");
+	if (!res) {
+		dev_err(dev, "DT error getting \"gsi\" memory property\n");
+		return ERR_PTR(-ENODEV);
+	}
+
+	size = resource_size(res);
+	if (res->start > U32_MAX || size > U32_MAX - res->start) {
+		dev_err(dev, "DT memory resource \"gsi\" out of range\n");
+		return ERR_PTR(-EINVAL);
+	}
+
+	/* Make sure we can make our pointer adjustment if necessary */
+	adjust = gsi->base.version < IPA_VERSION_4_5 ? 0 : GSI_EE_REG_ADJUST;
+	if (res->start < adjust) {
+		dev_err(dev, "DT memory resource \"gsi\" too low (< %u)\n",
+			adjust);
+		return ERR_PTR(-EINVAL);
+	}
+
+	gsi->virt = ioremap(res->start, size);
+	if (!gsi->virt) {
+		dev_err(dev, "unable to remap \"gsi\" memory\n");
+		return ERR_PTR(-ENOMEM);
+	}
+	/* Adjust register range pointer downward for newer IPA versions */
+	gsi->virt -= adjust;
+
+	init_completion(&gsi->completion);
+
+	ret = gsi_irq_init(gsi, pdev);
+	if (ret)
+		goto err_iounmap;
+
+	ret = gsi_channel_init(gsi, count, data);
+	if (ret)
+		goto err_irq_exit;
+
+	mutex_init(&gsi->base.mutex);
+
+	gsi->base.setup = gsi_setup;
+	gsi->base.teardown = gsi_teardown;
+	gsi->base.exit = gsi_exit;
+	gsi->base.channel_tre_max = gsi_channel_tre_max;
+	gsi->base.channel_trans_tre_max = gsi_channel_trans_tre_max;
+	gsi->base.channel_start = gsi_channel_start;
+	gsi->base.channel_stop = gsi_channel_stop;
+	gsi->base.channel_reset = gsi_channel_reset;
+	gsi->base.channel_suspend = gsi_channel_suspend;
+	gsi->base.channel_resume = gsi_channel_resume;
+
+	return &gsi->base;
+
+err_irq_exit:
+	gsi_irq_exit(gsi);
+err_iounmap:
+	iounmap(gsi->virt);
+
+	return ERR_PTR(ret);
+}
+
+/* Inverse of gsi_init() */
+static void gsi_exit(struct ipa_transport *transport)
+{
+	struct gsi *gsi = to_gsi(transport);
+
+	mutex_destroy(&transport->mutex);
+	gsi_channel_exit(gsi);
+	gsi_irq_exit(gsi);
+	iounmap(gsi->virt);
 }

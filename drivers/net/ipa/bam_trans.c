@@ -15,21 +15,21 @@
 
 int bam_channel_trans_init(struct bam *bam, u32 channel_id)
 {
-	struct bam_channel *channel = &bam->channel[channel_id];
+	struct ipa_channel *channel = &bam->base.channel[channel_id];
 	struct ipa_trans_info *trans_info;
 	int ret;
 
 	trans_info = &channel->trans_info;
 
 	ret = ipa_trans_pool_init(&trans_info->pool, sizeof(struct ipa_trans),
-			SPS_MAX_BURST_SIZE, SPS_MAX_BURST_SIZE);
+			BAM_MAX_BURST_SIZE, BAM_MAX_BURST_SIZE);
 	if (ret)
 		return ret;
 
 	/* FIXME: find out actual BAM hardware limits */
 	ret = ipa_trans_pool_init(&trans_info->sg_pool,
 				  sizeof(struct scatterlist),
-				  SPS_MAX_BURST_SIZE, SPS_MAX_BURST_SIZE);
+				  BAM_MAX_BURST_SIZE, BAM_MAX_BURST_SIZE);
 	if (ret)
 		goto err_trans_pool_exit;
 
@@ -51,7 +51,7 @@ struct ipa_trans *bam_channel_trans_alloc(struct bam *bam, u32 channel_id,
 					  u32 tre_count,
 					  enum dma_data_direction direction)
 {
-	struct bam_channel *channel = &bam->channel[channel_id];
+	struct ipa_channel *channel = &bam->base.channel[channel_id];
 	struct ipa_trans_info *trans_info;
 	struct ipa_trans *trans;
 
@@ -61,22 +61,13 @@ struct ipa_trans *bam_channel_trans_alloc(struct bam *bam, u32 channel_id,
 
 	/* Allocate and initialize non-zero fields in the the transaction */
 	trans = ipa_trans_pool_alloc(&trans_info->pool, 1);
-	if (!trans) {
-		dev_err(bam->dev, "trans pool empty\n");
-		return trans;
-	}
-
-	trans->bam = bam;
+	trans->transport = &bam->base;
 	trans->channel_id = channel_id;
 	trans->tre_count = tre_count;
 	init_completion(&trans->completion);
 
 	/* Allocate the scatterlist and (if requested) info entries. */
 	trans->sgl = ipa_trans_pool_alloc(&trans_info->sg_pool, tre_count);
-	if (!trans->sgl) {
-		dev_err(bam->dev, "sgl empty\n");
-		return NULL;
-	}
 	sg_init_marker(trans->sgl, tre_count);
 
 	trans->direction = direction;
@@ -95,10 +86,10 @@ struct ipa_trans *bam_channel_trans_alloc(struct bam *bam, u32 channel_id,
 void bam_trans_callback(void *arg)
 {
 	struct ipa_trans *trans = arg;
+	pr_info("ipa: in cb\n");
 	/* If the entire SGL was mapped when added, unmap it now */
-	pr_info("ipa: in callback\n");
 	if (trans->direction != DMA_NONE)
-		dma_unmap_sg(trans->bam->dev, trans->sgl, trans->used,
+		dma_unmap_sg(trans->transport->dev, trans->sgl, trans->used,
 				trans->direction);
 
 	/* FIXME
@@ -120,7 +111,8 @@ void bam_trans_callback(void *arg)
 
 void __bam_trans_commit(struct ipa_trans *trans)
 {
-	struct bam_channel *channel = &trans->bam->channel[trans->channel_id];
+	struct ipa_channel *channel = &trans->transport->channel[trans->channel_id];
+	struct bam_channel_priv *priv = channel->priv;
 	enum ipa_cmd_opcode opcode = IPA_CMD_NONE;
 	struct ipa_cmd_info *info;
 	struct scatterlist *sg;
@@ -148,14 +140,17 @@ void __bam_trans_commit(struct ipa_trans *trans)
 			opcode = info++->opcode;
 
 		if (opcode != IPA_CMD_NONE) {
+			pr_info("ipa: prepping imm cmd\n");
 			len = opcode;
 			dma_flags |= DMA_PREP_IMM_CMD;
 		}
 
-		if (last_tre)
+		if (last_tre) {
+			pr_info("ipa: req irq\n");
 			dma_flags |= DMA_PREP_INTERRUPT;
+		}
 
-		desc = dmaengine_prep_slave_single(channel->chan, addr, len,
+		desc = dmaengine_prep_slave_single(priv->chan, addr, len,
 				direction, dma_flags);
 
 		if (last_tre) {
@@ -180,7 +175,7 @@ void __bam_trans_commit(struct ipa_trans *trans)
 
 	ipa_trans_move_pending(trans);
 
-	dma_async_issue_pending(channel->chan);
+	dma_async_issue_pending(priv->chan);
 }
 
 void bam_trans_commit(struct ipa_trans *trans)

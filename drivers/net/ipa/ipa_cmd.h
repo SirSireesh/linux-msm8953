@@ -106,7 +106,7 @@ int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
  * ipa_cmd_pool_exit() - Inverse of ipa_cmd_pool_init()
  * @channel:	AP->IPA command TX GSI channel pointer
  */
-void ipa_cmd_pool_exit(struct gsi_channel *channel);
+void ipa_cmd_pool_exit(struct ipa_channel *channel);
 
 /**
  * ipa_cmd_table_init_add_v3() - Add table init command to a transaction

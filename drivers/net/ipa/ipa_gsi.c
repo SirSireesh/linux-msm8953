@@ -12,33 +12,26 @@
 #include "ipa_endpoint.h"
 #include "ipa_data.h"
 #include "gsi.h"
+#include "bam.h"
 
 void ipa_gsi_trans_complete(struct ipa_trans *trans)
 {
-	struct ipa *ipa;
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
+	struct ipa *ipa = trans->transport->ipa;
 
 	ipa_endpoint_trans_complete(ipa->channel_map[trans->channel_id], trans);
 }
 
 void ipa_gsi_trans_release(struct ipa_trans *trans)
 {
-	struct ipa *ipa;
-	if (trans->gsi)
-		ipa = container_of(trans->gsi, struct ipa, gsi);
-	else
-		ipa = container_of(trans->bam, struct ipa, bam);
+	struct ipa *ipa = trans->transport->ipa;
 
 	ipa_endpoint_trans_release(ipa->channel_map[trans->channel_id], trans);
 }
 
-void ipa_gsi_channel_tx_queued(struct gsi *gsi, u32 channel_id, u32 count,
-			       u32 byte_count)
+void ipa_transport_channel_tx_queued(struct ipa_transport *transport,
+				     u32 channel_id, u32 count, u32 byte_count)
 {
-	struct ipa *ipa = container_of(gsi, struct ipa, gsi);
+	struct ipa *ipa = transport->ipa;
 	struct ipa_endpoint *endpoint;
 
 	endpoint = ipa->channel_map[channel_id];
@@ -46,21 +39,10 @@ void ipa_gsi_channel_tx_queued(struct gsi *gsi, u32 channel_id, u32 count,
 		netdev_sent_queue(endpoint->netdev, byte_count);
 }
 
-void ipa_bam_channel_tx_queued(struct bam *bam, u32 channel_id, u32 count,
-			       u32 byte_count)
+void ipa_transport_channel_tx_completed(struct ipa_transport *transport,
+					u32 channel_id, u32 count, u32 byte_count)
 {
-	struct ipa *ipa = container_of(bam, struct ipa, bam);
-	struct ipa_endpoint *endpoint;
-
-	endpoint = ipa->channel_map[channel_id];
-	if (endpoint->netdev)
-		netdev_sent_queue(endpoint->netdev, byte_count);
-}
-
-void ipa_gsi_channel_tx_completed(struct gsi *gsi, u32 channel_id, u32 count,
-				  u32 byte_count)
-{
-	struct ipa *ipa = container_of(gsi, struct ipa, gsi);
+	struct ipa *ipa = transport->ipa;
 	struct ipa_endpoint *endpoint;
 
 	endpoint = ipa->channel_map[channel_id];
@@ -71,7 +53,7 @@ void ipa_gsi_channel_tx_completed(struct gsi *gsi, u32 channel_id, u32 count,
 void ipa_bam_channel_tx_completed(struct bam *bam, u32 channel_id, u32 count,
 				  u32 byte_count)
 {
-	struct ipa *ipa = container_of(bam, struct ipa, bam);
+	struct ipa *ipa = bam->base.ipa;
 	struct ipa_endpoint *endpoint;
 
 	endpoint = ipa->channel_map[channel_id];
