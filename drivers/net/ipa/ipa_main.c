@@ -910,7 +910,6 @@ static int ipa_probe(struct platform_device *pdev)
 	ipa->modem_rproc = rproc;
 	ipa->clock = clock;
 	ipa->version = data->version;
-	ipa->cmd_ops = data->cmd_ops;
 
 	ret = ipa_reg_init(ipa);
 	if (ret)

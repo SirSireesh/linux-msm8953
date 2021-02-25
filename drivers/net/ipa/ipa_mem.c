@@ -43,7 +43,7 @@ ipa_mem_zero_region_add(struct ipa_trans *trans, const struct ipa_mem *mem)
 	if (!mem->size)
 		return;
 
-	ipa->cmd_ops->dma_shared_mem_add(trans, mem->offset, mem->size, addr, true);
+	ipa_cmd_dma_shared_mem_add(trans, mem->offset, mem->size, addr, true);
 }
 
 /**
@@ -77,7 +77,7 @@ int ipa_mem_setup(struct ipa *ipa)
 		 * modem header memory. There is no AP_HEADER either, but since we
 		 * only care about its size, and not region, its fine.
 		 */
-		trans = ipa->cmd_ops->trans_alloc(ipa, 4);
+		trans = ipa_cmd_trans_alloc(ipa, 4);
 		if (!trans) {
 			dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
 			return -EBUSY;
@@ -90,7 +90,7 @@ int ipa_mem_setup(struct ipa *ipa)
 		size = ipa->mem[IPA_MEM_MODEM_HEADER].size;
 		size += ipa->mem[IPA_MEM_AP_HEADER].size;
 
-		ipa->cmd_ops->hdr_init_local_add(trans, offset, size, addr);
+		ipa_cmd_hdr_init_local_add(trans, offset, size, addr);
 
 		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM]);
 
@@ -101,7 +101,7 @@ int ipa_mem_setup(struct ipa *ipa)
 		ipa_trans_commit_wait(trans);
 
 	} else {
-		trans = ipa->cmd_ops->trans_alloc(ipa, 4);
+		trans = ipa_cmd_trans_alloc(ipa, 4);
 		if (!trans) {
 			dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
 			return -EBUSY;
@@ -114,7 +114,7 @@ int ipa_mem_setup(struct ipa *ipa)
 		size = ipa->mem[IPA_MEM_MODEM_HEADER].size;
 		size += ipa->mem[IPA_MEM_AP_HEADER].size;
 
-		ipa->cmd_ops->hdr_init_local_add(trans, offset, size, addr);
+		ipa_cmd_hdr_init_local_add(trans, offset, size, addr);
 
 		ipa_mem_zero_region_add(trans, &ipa->mem[IPA_MEM_MODEM_PROC_CTX]);
 
@@ -296,7 +296,7 @@ int ipa_mem_zero_modem(struct ipa *ipa)
 
 	if (ipa->version == IPA_VERSION_2_6L) {
 		/* IPA v2.6L only needs the header region zeroed */
-		trans = ipa->cmd_ops->trans_alloc(ipa, 1);
+		trans = ipa_cmd_trans_alloc(ipa, 1);
 		if (!trans) {
 			dev_err(&ipa->pdev->dev,
 					"no transaction to zero modem memory\n");
@@ -310,7 +310,7 @@ int ipa_mem_zero_modem(struct ipa *ipa)
 		/* Get a transaction to zero the modem memory, modem header,
 		 * and modem processing context regions.
 		 */
-		trans = ipa->cmd_ops->trans_alloc(ipa, 3);
+		trans = ipa_cmd_trans_alloc(ipa, 3);
 		if (!trans) {
 			dev_err(&ipa->pdev->dev,
 					"no transaction to zero modem memory\n");

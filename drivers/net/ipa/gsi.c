@@ -2032,7 +2032,7 @@ static void gsi_channel_exit_one(struct gsi_channel *channel)
 		return;		/* Ignore uninitialized channels */
 
 	if (channel->command)
-		ipa_v3_cmd_pool_exit(channel);
+		ipa_cmd_pool_exit(channel);
 	gsi_channel_trans_exit(channel);
 	gsi_ring_free(channel->gsi, &channel->tre_ring);
 	gsi_channel_evt_ring_exit(channel);

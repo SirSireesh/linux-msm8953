@@ -193,5 +193,4 @@ const struct ipa_data ipa_data_msm8953 = {
 	.endpoint_data	= ipa_gsi_endpoint_data,
 	.mem_data	= &ipa_mem_data,
 	.clock_data	= &ipa_clock_data,
-	.cmd_ops	= &ipa_v2_cmd_ops,
 };

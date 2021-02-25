@@ -11,7 +11,6 @@
 #include "ipa_version.h"
 #include "ipa_endpoint.h"
 #include "ipa_mem.h"
-#include "ipa_cmd.h"
 
 /**
  * DOC: IPA/GSI Configuration Data
@@ -306,7 +305,6 @@ struct ipa_data {
 	const struct ipa_resource_data *resource_data;
 	const struct ipa_mem_data *mem_data;
 	const struct ipa_clock_data *clock_data;
-	const struct ipa_cmd_ops *cmd_ops;
 };
 
 extern const struct ipa_data ipa_data_msm8953;

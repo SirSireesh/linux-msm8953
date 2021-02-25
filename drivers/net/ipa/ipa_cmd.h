@@ -16,8 +16,7 @@ struct ipa;
 struct ipa_mem;
 struct ipa_trans;
 struct ipa_trans_info;
-struct bam_channel;
-struct gsi_channel;
+struct gsi_channel; /*FIXME*/
 
 /**
  * enum ipa_cmd_opcode:	IPA immediate commands
@@ -91,89 +90,6 @@ static inline bool ipa_cmd_data_valid(struct ipa *ipa)
 
 #endif /* !IPA_VALIDATE */
 
-struct ipa_cmd_ops {
-
-/**
- * table_init_add() - Add table init command to a transaction
- * @trans:	GSI transaction
- * @opcode:	IPA immediate command opcode
- * @size:	Size of non-hashed routing table memory
- * @offset:	Offset in IPA shared memory of non-hashed routing table memory
- * @addr:	DMA address of non-hashed table data to write
- * @hash_size:	Size of hashed routing table memory
- * @hash_offset: Offset in IPA shared memory of hashed routing table memory
- * @hash_addr:	DMA address of hashed table data to write
- * @ipv4:	If the rule is for IPv4 or IPv6. Used only on IPA v2.x
- *
- * If hash_size is 0, hash_offset and hash_addr are ignored.
- */
-	void (*table_init_add)(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
-			       u16 size, u32 offset, dma_addr_t addr,
-			       u16 hash_size, u32 hash_offset,
-			       dma_addr_t hash_addr, bool ipv4);
-
-/**
- * ipa_cmd_hdr_init_local_add() - Add a header init command to a transaction
- * @ipa:	IPA structure
- * @offset:	Offset of header memory in IPA local space
- * @size:	Size of header memory
- * @addr:	DMA address of buffer to be written from
- *
- * Defines and fills the location in IPA memory to use for headers.
- */
-	void (*hdr_init_local_add)(struct ipa_trans *trans, u32 offset, u16 size,
-				   dma_addr_t addr);
-
-/**
- * ipa_cmd_register_write_add() - Add a register write command to a transaction
- * @trans:	GSI transaction
- * @offset:	Offset of register to be written
- * @value:	Value to be written
- * @mask:	Mask of bits in register to update with bits from value
- * @clear_full: Pipeline clear option; true means full pipeline clear
- */
-	void (*register_write_add)(struct ipa_trans *trans, u32 offset, u32 value,
-				   u32 mask, bool clear_full);
-
-/**
- * ipa_cmd_dma_shared_mem_add() - Add a DMA memory command to a transaction
- * @trans:	GSI transaction
- * @offset:	Offset of IPA memory to be read or written
- * @size:	Number of bytes of memory to be transferred
- * @addr:	DMA address of buffer to be read into or written from
- * @toward_ipa:	true means write to IPA memory; false means read
- */
-	void (*dma_shared_mem_add)(struct ipa_trans *trans, u32 offset,
-				   u16 size, dma_addr_t addr, bool toward_ipa);
-
-/**
- * ipa_cmd_tag_process_add() - Add IPA tag process commands to a transaction
- * @trans:	GSI transaction
- */
-	void (*tag_process_add)(struct ipa_trans *trans);
-
-/**
- * ipa_cmd_tag_process() - Perform a tag process
- *
- * @Return:	The number of elements to allocate in a transaction
- *		to hold tag process commands
- */
-	void (*tag_process)(struct ipa *ipa);
-
-/**
- * ipa_cmd_trans_alloc() - Allocate a transaction for the command TX endpoint
- * @ipa:	IPA pointer
- * @tre_count:	Number of elements in the transaction
- *
- * Return:	A GSI transaction structure, or a null pointer if all
- *		available transactions are in use
- */
-	struct ipa_trans *(*trans_alloc)(struct ipa *ipa, u32 tre_count);
-};
-
-extern const struct ipa_cmd_ops ipa_v2_cmd_ops;
-extern const struct ipa_cmd_ops ipa_v3_cmd_ops;
-
 /**
  * ipa_cmd_pool_init() - initialize command channel pools
  * @dev:	DMA device struct
@@ -190,8 +106,73 @@ int ipa_cmd_pool_init(struct device *dev, struct ipa_trans_info *trans_info,
  * ipa_cmd_pool_exit() - Inverse of ipa_cmd_pool_init()
  * @channel:	AP->IPA command TX GSI channel pointer
  */
-void ipa_v2_cmd_pool_exit(struct bam_channel *channel);
-void ipa_v3_cmd_pool_exit(struct gsi_channel *channel);
+void ipa_cmd_pool_exit(struct gsi_channel *channel);
+
+/**
+ * ipa_cmd_table_init_add_v3() - Add table init command to a transaction
+ * @trans:	GSI transaction
+ * @opcode:	IPA immediate command opcode
+ * @size:	Size of non-hashed routing table memory
+ * @offset:	Offset in IPA shared memory of non-hashed routing table memory
+ * @addr:	DMA address of non-hashed table data to write
+ * @hash_size:	Size of hashed routing table memory
+ * @hash_offset: Offset in IPA shared memory of hashed routing table memory
+ * @hash_addr:	DMA address of hashed table data to write
+ *
+ * If hash_size is 0, hash_offset and hash_addr are ignored.
+ */
+void ipa_v3_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
+			       u16 size, u32 offset, dma_addr_t addr,
+			       u16 hash_size, u32 hash_offset,
+			       dma_addr_t hash_addr);
+
+void ipa_v2_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
+			       u16 size, u32 offset, dma_addr_t addr, bool ipv4);
+
+void ipa_cmd_table_init_add(struct ipa_trans *trans, enum ipa_cmd_opcode opcode,
+			    u16 size, u32 offset, dma_addr_t addr,
+			    u16 hash_size, u32 hash_offset,
+			    dma_addr_t hash_addr, bool ipv4);
+
+/**
+ * ipa_cmd_hdr_init_local_add() - Add a header init command to a transaction
+ * @ipa:	IPA structure
+ * @offset:	Offset of header memory in IPA local space
+ * @size:	Size of header memory
+ * @addr:	DMA address of buffer to be written from
+ *
+ * Defines and fills the location in IPA memory to use for headers.
+ */
+void ipa_cmd_hdr_init_local_add(struct ipa_trans *trans, u32 offset, u16 size,
+				dma_addr_t addr);
+
+/**
+ * ipa_cmd_register_write_add() - Add a register write command to a transaction
+ * @trans:	GSI transaction
+ * @offset:	Offset of register to be written
+ * @value:	Value to be written
+ * @mask:	Mask of bits in register to update with bits from value
+ * @clear_full: Pipeline clear option; true means full pipeline clear
+ */
+void ipa_cmd_register_write_add(struct ipa_trans *trans, u32 offset, u32 value,
+				u32 mask, bool clear_full);
+
+/**
+ * ipa_cmd_dma_shared_mem_add() - Add a DMA memory command to a transaction
+ * @trans:	GSI transaction
+ * @offset:	Offset of IPA memory to be read or written
+ * @size:	Number of bytes of memory to be transferred
+ * @addr:	DMA address of buffer to be read into or written from
+ * @toward_ipa:	true means write to IPA memory; false means read
+ */
+void ipa_cmd_dma_shared_mem_add(struct ipa_trans *trans, u32 offset,
+				u16 size, dma_addr_t addr, bool toward_ipa);
+
+/**
+ * ipa_cmd_tag_process_add() - Add IPA tag process commands to a transaction
+ * @trans:	GSI transaction
+ */
+void ipa_cmd_tag_process_add(struct ipa_trans *trans);
 
 /**
  * ipa_cmd_tag_process_add_count() - Number of commands in a tag process
@@ -200,5 +181,23 @@ void ipa_v3_cmd_pool_exit(struct gsi_channel *channel);
  *		to hold tag process commands
  */
 u32 ipa_cmd_tag_process_count(void);
+
+/**
+ * ipa_cmd_tag_process() - Perform a tag process
+ *
+ * @Return:	The number of elements to allocate in a transaction
+ *		to hold tag process commands
+ */
+void ipa_cmd_tag_process(struct ipa *ipa);
+
+/**
+ * ipa_cmd_trans_alloc() - Allocate a transaction for the command TX endpoint
+ * @ipa:	IPA pointer
+ * @tre_count:	Number of elements in the transaction
+ *
+ * Return:	A GSI transaction structure, or a null pointer if all
+ *		available transactions are in use
+ */
+struct ipa_trans *ipa_cmd_trans_alloc(struct ipa *ipa, u32 tre_count);
 
 #endif /* _IPA_CMD_H_ */

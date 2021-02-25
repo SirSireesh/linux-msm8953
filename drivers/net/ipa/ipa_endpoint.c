@@ -410,7 +410,7 @@ int ipa_endpoint_modem_exception_reset_all(struct ipa *ipa)
 	 * for now.  We need to end the transaction with a "tag process."
 	 */
 	count = hweight32(initialized) + ipa_cmd_tag_process_count();
-	trans = ipa->cmd_ops->trans_alloc(ipa, count);
+	trans = ipa_cmd_trans_alloc(ipa, count);
 	if (!trans) {
 		dev_err(&ipa->pdev->dev,
 			"no transaction to reset modem exception endpoints\n");
@@ -443,11 +443,10 @@ int ipa_endpoint_modem_exception_reset_all(struct ipa *ipa)
 		 * means status is disabled on the endpoint, and as a
 		 * result all other fields in the register are ignored.
 		 */
-		ipa->cmd_ops->register_write_add(trans, offset, value,
-						 value_mask, false);
+		ipa_cmd_register_write_add(trans, offset, value, value_mask, false);
 	}
 
-	ipa->cmd_ops->tag_process_add(trans);
+	ipa_cmd_tag_process_add(trans);
 
 	/* XXX This should have a 1 second timeout */
 	ipa_trans_commit_wait(trans);
@@ -1627,7 +1626,7 @@ void ipa_endpoint_suspend(struct ipa *ipa)
 	if (ipa->modem_netdev)
 		ipa_modem_suspend(ipa->modem_netdev);
 
-	ipa->cmd_ops->tag_process(ipa);
+	ipa_cmd_tag_process(ipa);
 
 	ipa_endpoint_suspend_one(ipa->name_map[IPA_ENDPOINT_AP_LAN_RX]);
 	ipa_endpoint_suspend_one(ipa->name_map[IPA_ENDPOINT_AP_COMMAND_TX]);
