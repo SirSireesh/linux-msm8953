@@ -1,0 +1,101 @@
+cp () {
+    mkdir -p $(dirname $2)
+    `which cp` $1 $2
+}
+cp /home/junak/k/msm-4.19/include/dt-bindings/msm/msm-bus-ids.h /home/junak/mainline/include/dt-bindings/msm/msm-bus-ids.h
+cp /home/junak/k/msm-4.19/include/linux/ipa.h /home/junak/mainline/include/linux/ipa.h
+cp /home/junak/k/msm-4.19/include/linux/ipa_mhi.h /home/junak/mainline/include/linux/ipa_mhi.h
+cp /home/junak/k/msm-4.19/include/linux/ipa_uc_offload.h /home/junak/mainline/include/linux/ipa_uc_offload.h
+cp /home/junak/k/msm-4.19/include/linux/ipa_wdi3.h /home/junak/mainline/include/linux/ipa_wdi3.h
+cp /home/junak/k/msm-4.19/include/linux/ipa_wigig.h /home/junak/mainline/include/linux/ipa_wigig.h
+cp /home/junak/k/msm-4.19/include/linux/msm-bus-board.h /home/junak/mainline/include/linux/msm-bus-board.h
+cp /home/junak/k/msm-4.19/include/linux/msm-bus.h /home/junak/mainline/include/linux/msm-bus.h
+cp /home/junak/k/msm-4.19/include/net/rmnet_config.h /home/junak/mainline/include/net/rmnet_config.h
+cp /home/junak/k/msm-4.19/include/soc/qcom/subsystem_notif.h /home/junak/mainline/include/soc/qcom/subsystem_notif.h
+cp /home/junak/k/msm-4.19/include/soc/qcom/subsystem_restart.h /home/junak/mainline/include/soc/qcom/subsystem_restart.h
+cp /home/junak/k/msm-4.19/include/uapi/linux/ipa_qmi_service_v01.h /home/junak/mainline/include/uapi/linux/ipa_qmi_service_v01.h
+cp /home/junak/k/msm-4.19/include/uapi/linux/msm_ipa.h /home/junak/mainline/include/uapi/linux/msm_ipa.h
+cp /home/junak/k/msm-4.19/include/uapi/linux/msm_rmnet.h /home/junak/mainline/include/uapi/linux/msm_rmnet.h
+cp /home/junak/k/msm-4.19/include/uapi/linux/rmnet_ipa_fd_ioctl.h /home/junak/mainline/include/uapi/linux/rmnet_ipa_fd_ioctl.h
+# Not found: asm/barrier.h
+# Not found: asm/dma-iommu.h
+# Not found: linux/version.h
+# Not found: stdint.h
+# Not found: stdio.h
+# Not found: sys/stat.h
+# Present linux/bitops.h
+# Present linux/cdev.h
+# Present linux/clk.h
+# Present linux/compat.h
+# Present linux/completion.h
+# Present linux/debugfs.h
+# Present linux/delay.h
+# Present linux/device.h
+# Present linux/dmapool.h
+# Present linux/errno.h
+# Present linux/export.h
+# Present linux/fs.h
+# Present linux/genalloc.h
+# Present linux/hashtable.h
+# Present linux/idr.h
+# Present linux/if_arp.h
+# Present linux/if_ether.h
+# Present linux/init.h
+# Present linux/input.h
+# Present linux/interrupt.h
+# Present linux/io.h
+# Present linux/iommu.h
+# Present linux/ipc_logging.h
+# Present linux/jhash.h
+# Present linux/jiffies.h
+# Present linux/kernel.h
+# Present linux/list.h
+# Present linux/mm.h
+# Present linux/module.h
+# Present linux/msm-sps.h
+# Present linux/mutex.h
+# Present linux/netdevice.h
+# Present linux/notifier.h
+# Present linux/of_device.h
+# Present linux/of.h
+# Present linux/of_platform.h
+# Present linux/pci.h
+# Present linux/platform_device.h
+# Present linux/ratelimit.h
+# Present linux/rbtree.h
+# Present linux/sched.h
+# Present linux/sched/signal.h
+# Present linux/skbuff.h
+# Present linux/slab.h
+# Present linux/soc/qcom/qmi.h
+# Present linux/spinlock.h
+# Present linux/stddef.h
+# Present linux/string.h
+# Present linux/stringify.h
+# Present linux/time.h
+# Present linux/timer.h
+# Present linux/tracepoint.h
+# Present linux/types.h
+# Present linux/uaccess.h
+# Present linux/vmalloc.h
+# Present linux/workqueue.h
+# Present net/ip.h
+# Present net/pkt_sched.h
+# Present soc/qcom/tcs.h
+# Present trace/define_trace.h
+# Present uapi/linux/errno.h
+# Present uapi/linux/fs.h
+# Present uapi/linux/if_arp.h
+# Present uapi/linux/if_ether.h
+# Present uapi/linux/input.h
+# Present uapi/linux/ioctl.h
+# Present uapi/linux/kernel.h
+# Present uapi/linux/module.h
+# Present uapi/linux/netdevice.h
+# Present uapi/linux/pci.h
+# Present uapi/linux/sched.h
+# Present uapi/linux/stddef.h
+# Present uapi/linux/string.h
+# Present uapi/linux/time.h
+# Present uapi/linux/types.h
+# Present uapi/linux/unistd.h
