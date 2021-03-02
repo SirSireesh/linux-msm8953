@@ -1148,7 +1148,7 @@ out:
 	return ret;
 }
 
-static void ipa_wwan_tx_timeout(struct net_device *dev)
+static void ipa_wwan_tx_timeout(struct net_device *dev, unsigned int unused)
 {
 	IPAWANERR("[%s]:[%s] data stall in UL\n", __func__, dev->name);
 }

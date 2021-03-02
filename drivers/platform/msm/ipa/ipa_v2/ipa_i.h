@@ -17,7 +17,7 @@
 #include <linux/ipa.h>
 #include <linux/msm-sps.h>
 #include <linux/platform_device.h>
-#include <asm/dma-iommu.h>
+//#include <asm/dma-iommu.h>
 #include <linux/iommu.h>
 #include <linux/ipa_uc_offload.h>
 #include "ipa_hw_defs.h"

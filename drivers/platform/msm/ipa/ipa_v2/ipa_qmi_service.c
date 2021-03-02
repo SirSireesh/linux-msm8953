@@ -10,7 +10,6 @@
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/uaccess.h>
-#include <soc/qcom/subsystem_restart.h>
 #include <linux/ipa.h>
 #include <linux/vmalloc.h>
 
@@ -199,6 +198,8 @@ static void handle_ipa_config_req(struct qmi_handle *qmi_handle,
 	memset(&resp, 0, sizeof(struct ipa_config_resp_msg_v01));
 	resp.resp.result = IPA_QMI_RESULT_SUCCESS_V01;
 	IPAWANDBG("Received IPA CONFIG Request\n");
+
+#if 0
 	rc = ipa_mhi_handle_ipa_config_req(
 		(struct ipa_config_req_msg_v01 *)decoded_msg);
 	if (rc) {
@@ -207,6 +208,7 @@ static void handle_ipa_config_req(struct qmi_handle *qmi_handle,
 	}
 	IPAWANDBG("qmi_snd_rsp: result %d, err %d\n",
 		resp.resp.result, resp.resp.error);
+#endif
 	rc = qmi_send_response(qmi_handle, sq, txn,
 		QMI_IPA_CONFIG_RESP_V01,
 		QMI_IPA_CONFIG_RESP_MAX_MSG_LEN_V01,

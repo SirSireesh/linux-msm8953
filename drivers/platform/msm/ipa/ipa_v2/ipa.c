@@ -1637,7 +1637,7 @@ static int ipa_init_smem_region(int memory_region_size,
 	memset(&mem, 0, sizeof(mem));
 
 	mem.size = memory_region_size;
-	mem.base = dma_zalloc_coherent(ipa_ctx->pdev, mem.size,
+	mem.base = dma_alloc_coherent(ipa_ctx->pdev, mem.size,
 		&mem.phys_base, GFP_KERNEL);
 	if (!mem.base) {
 		IPAERR("failed to alloc DMA buff of size %d\n", mem.size);
@@ -2210,7 +2210,7 @@ int _ipa_init_sram_v2(void)
 	iounmap(ipa_sram_mmio);
 
 	mem.size = IPA_STATUS_CLEAR_SIZE;
-	mem.base = dma_zalloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
+	mem.base = dma_alloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
 			GFP_KERNEL);
 	if (!mem.base) {
 		IPAERR("fail to alloc DMA buff of size %d\n", mem.size);
@@ -2332,7 +2332,7 @@ int _ipa_init_hdr_v2(void)
 	int rc = 0;
 
 	mem.size = IPA_MEM_PART(modem_hdr_size) + IPA_MEM_PART(apps_hdr_size);
-	mem.base = dma_zalloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
+	mem.base = dma_alloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
 			GFP_KERNEL);
 	if (!mem.base) {
 		IPAERR("fail to alloc DMA buff of size %d\n", mem.size);
@@ -2377,7 +2377,7 @@ int _ipa_init_hdr_v2_5(void)
 	gfp_t flag = GFP_KERNEL | (ipa_ctx->use_dma_zone ? GFP_DMA : 0);
 
 	mem.size = IPA_MEM_PART(modem_hdr_size) + IPA_MEM_PART(apps_hdr_size);
-	mem.base = dma_zalloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
+	mem.base = dma_alloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
 		GFP_KERNEL);
 	if (!mem.base) {
 		IPAERR("fail to alloc DMA buff of size %d\n", mem.size);
@@ -2416,7 +2416,7 @@ int _ipa_init_hdr_v2_5(void)
 
 	mem.size = IPA_MEM_PART(modem_hdr_proc_ctx_size) +
 		IPA_MEM_PART(apps_hdr_proc_ctx_size);
-	mem.base = dma_zalloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
+	mem.base = dma_alloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
 		GFP_KERNEL);
 	if (!mem.base) {
 		IPAERR("fail to alloc DMA buff of size %d\n", mem.size);
@@ -4219,7 +4219,7 @@ static int ipa_init(const struct ipa_plat_drv_res *resource_p,
 	ipa_ctx->empty_rt_tbl_mem.size = IPA_ROUTING_RULE_BYTE_SIZE;
 
 	ipa_ctx->empty_rt_tbl_mem.base =
-		dma_zalloc_coherent(ipa_ctx->pdev,
+		dma_alloc_coherent(ipa_ctx->pdev,
 				ipa_ctx->empty_rt_tbl_mem.size,
 				    &ipa_ctx->empty_rt_tbl_mem.phys_base,
 				    GFP_KERNEL);
@@ -4702,8 +4702,10 @@ static int ipa_smmu_wlan_cb_probe(struct device *dev)
 	 * checks to see if they've been set in dtsi.  If so, the logic
 	 * further below acts accordingly...
 	 */
+#if 0 // FIXME
 	iommu_domain_get_attr(cb->iommu_domain, DOMAIN_ATTR_S1_BYPASS, &bypass);
 	iommu_domain_get_attr(cb->iommu_domain, DOMAIN_ATTR_FAST, &fast);
+#endif
 
 	IPADBG(
 	  "WLAN CB PROBE dev=%pK DOMAIN ATTRS bypass=%d fast=%d\n",
@@ -4766,8 +4768,10 @@ static int ipa_smmu_uc_cb_probe(struct device *dev)
 	 * further below acts accordingly...
 	 */
 
+#if 0 // FIXME
 	iommu_domain_get_attr(cb->iommu_domain, DOMAIN_ATTR_S1_BYPASS, &bypass);
 	iommu_domain_get_attr(cb->iommu_domain, DOMAIN_ATTR_FAST, &fast);
+#endif
 
 	IPADBG("UC CB PROBE dev=%pK DOMAIN ATTRS bypass=%d fast=%d\n",
 		   dev, bypass, fast);
@@ -4831,8 +4835,10 @@ static int ipa_smmu_ap_cb_probe(struct device *dev)
 	 * checks to see if they've been set in dtsi.  If so, the logic
 	 * further below acts accordingly...
 	 */
+#if 0 // FIXME
 	iommu_domain_get_attr(cb->iommu_domain, DOMAIN_ATTR_S1_BYPASS, &bypass);
 	iommu_domain_get_attr(cb->iommu_domain, DOMAIN_ATTR_FAST, &fast);
+#endif
 
 	IPADBG("AP CB PROBE dev=%pK DOMAIN ATTRS bypass=%d fast=%d\n",
 			dev, bypass, fast);

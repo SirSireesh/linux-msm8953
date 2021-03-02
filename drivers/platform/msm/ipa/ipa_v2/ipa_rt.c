@@ -482,7 +482,7 @@ static int ipa_generate_rt_hw_tbl_v1_1(enum ipa_ip_type ip,
 		IPAERR("rt tbl empty ip=%d\n", ip);
 		goto error;
 	}
-	mem->base = dma_zalloc_coherent(ipa_ctx->pdev, mem->size,
+	mem->base = dma_alloc_coherent(ipa_ctx->pdev, mem->size,
 			&mem->phys_base, GFP_KERNEL);
 	if (!mem->base) {
 		IPAERR("fail to alloc DMA buff of size %d\n", mem->size);
@@ -691,7 +691,7 @@ static int ipa_generate_rt_hw_tbl_v2(enum ipa_ip_type ip,
 				~IPA_RT_TABLE_MEMORY_ALLIGNMENT;
 
 	if (mem->size > 0) {
-		mem->base = dma_zalloc_coherent(ipa_ctx->pdev, mem->size,
+		mem->base = dma_alloc_coherent(ipa_ctx->pdev, mem->size,
 				&mem->phys_base, GFP_KERNEL);
 		if (!mem->base) {
 			IPAERR("fail to alloc DMA buff of size %d\n",

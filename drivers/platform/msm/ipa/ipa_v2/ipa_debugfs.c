@@ -3,7 +3,7 @@
  * Copyright (c) 2012-2020, The Linux Foundation. All rights reserved.
  */
 
-#ifdef CONFIG_DEBUG_FS
+#if 0
 
 #include <linux/debugfs.h>
 #include <linux/kernel.h>

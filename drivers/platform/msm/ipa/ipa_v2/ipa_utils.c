@@ -3586,7 +3586,7 @@ static void _ipa_cfg_ep_metadata_v2_0(u32 pipe_number,
  *
  * Note:	Should not be called from atomic context
  */
-static int ipa2_cfg_ep_metadata(u32 clnt_hdl,
+int ipa2_cfg_ep_metadata(u32 clnt_hdl,
 			const struct ipa_ep_cfg_metadata *ep_md)
 {
 	if (clnt_hdl >= ipa_ctx->ipa_num_pipes ||

@@ -634,7 +634,7 @@ int ipa_uc_mhi_init_engine(struct ipa_mhi_msi_info *msi, u32 mmio_addr,
 	}
 
 	mem.size = sizeof(*init_cmd_data);
-	mem.base = dma_zalloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
+	mem.base = dma_alloc_coherent(ipa_ctx->pdev, mem.size, &mem.phys_base,
 		GFP_KERNEL);
 	if (!mem.base) {
 		IPAERR("fail to alloc DMA buff of size %d\n", mem.size);
