@@ -3954,6 +3954,7 @@ static int ipa_init(const struct ipa_plat_drv_res *resource_p,
 		ipa_ctx->ctrl->msm_bus_data_ptr = bus_scale_table;
 	}
 
+#if 0
 	if (ipa_ctx->ipa_hw_mode != IPA_HW_MODE_VIRTUAL) {
 		/* get BUS handle */
 		/* Check if bus handle is already registered */
@@ -3973,6 +3974,7 @@ static int ipa_init(const struct ipa_plat_drv_res *resource_p,
 	} else {
 		IPADBG("Skipping bus scaling registration on Virtual plat\n");
 	}
+#endif
 
 	result = ipa2_active_clients_log_init();
 	if (result)
@@ -4894,6 +4896,7 @@ int ipa_plat_drv_probe(struct platform_device *pdev_p,
 		if (!bus_scale_table)
 			bus_scale_table = msm_bus_cl_get_pdata(ipa_pdev);
 	}
+#if 0
 	if (bus_scale_table != NULL) {
 		if (of_device_is_compatible(dev->of_node, "qcom,ipa")) {
 			/*
@@ -4912,6 +4915,7 @@ int ipa_plat_drv_probe(struct platform_device *pdev_p,
 	} else {
 		return -EPROBE_DEFER;
 	}
+#endif
 
 	if (of_device_is_compatible(dev->of_node, "qcom,ipa-smmu-ap-cb"))
 		return ipa_smmu_ap_cb_probe(dev);
