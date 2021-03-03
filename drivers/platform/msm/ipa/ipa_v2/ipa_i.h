@@ -72,7 +72,7 @@
 
 #define IPADBG(fmt, args...) \
 	do { \
-		pr_debug(DRV_NAME " %s:%d " fmt, __func__, __LINE__, ## args);\
+		pr_err(DRV_NAME " %s:%d " fmt, __func__, __LINE__, ## args);\
 		if (ipa_ctx) { \
 			IPA_IPC_LOGGING(ipa_ctx->logbuf, \
 				DRV_NAME " %s:%d " fmt, ## args); \
@@ -83,7 +83,7 @@
 
 #define IPADBG_LOW(fmt, args...) \
 	do { \
-		pr_debug(DRV_NAME " %s:%d " fmt, __func__, __LINE__, ## args);\
+		pr_err(DRV_NAME " %s:%d " fmt, __func__, __LINE__, ## args);\
 		if (ipa_ctx) \
 			IPA_IPC_LOGGING(ipa_ctx->logbuf_low, \
 				DRV_NAME " %s:%d " fmt, ## args); \
@@ -1771,7 +1771,7 @@ void ipa_dump_buff_internal(void *base, dma_addr_t phy_base, u32 size);
 
 void ipa_rx_timeout_min_max_calc(u32 *min, u32 *max, s8 time);
 
-#ifdef IPA_DEBUG
+#if 1
 #define IPA_DUMP_BUFF(base, phy_base, size) \
 	ipa_dump_buff_internal(base, phy_base, size)
 #else
