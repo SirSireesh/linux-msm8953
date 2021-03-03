@@ -21,8 +21,7 @@
 #include <linux/version.h>
 #include <linux/workqueue.h>
 #include <net/pkt_sched.h>
-#include <soc/qcom/subsystem_restart.h>
-#include <soc/qcom/subsystem_notif.h>
+#include <linux/remoteproc/qcom_rproc.h>
 #include "ipa_qmi_service.h"
 #include <linux/rmnet_ipa_fd_ioctl.h>
 #include <linux/ipa.h>
@@ -2374,7 +2373,7 @@ static int ssr_notifier_cb(struct notifier_block *this,
 			   void *data)
 {
 	if (ipa_rmnet_ctx.ipa_rmnet_ssr) {
-		if (code == SUBSYS_BEFORE_SHUTDOWN) {
+		if (code == QCOM_SSR_BEFORE_SHUTDOWN) {
 			pr_info("IPA received MPSS BEFORE_SHUTDOWN\n");
 			/* send SSR before-shutdown notification to IPACM */
 			rmnet_ipa_send_ssr_notification(false);
@@ -2390,14 +2389,14 @@ static int ssr_notifier_cb(struct notifier_block *this,
 			pr_info("IPA BEFORE_SHUTDOWN handling is complete\n");
 			return NOTIFY_DONE;
 		}
-		if (code == SUBSYS_AFTER_SHUTDOWN) {
+		if (code == QCOM_SSR_AFTER_SHUTDOWN) {
 			pr_info("IPA received MPSS AFTER_SHUTDOWN\n");
 			if (atomic_read(&is_ssr))
 				ipa_q6_post_shutdown_cleanup();
 			pr_info("IPA AFTER_SHUTDOWN handling is complete\n");
 			return NOTIFY_DONE;
 		}
-		if (code == SUBSYS_AFTER_POWERUP) {
+		if (code == QCOM_SSR_AFTER_POWERUP) {
 			pr_info("IPA received MPSS AFTER_POWERUP\n");
 			if (!atomic_read(&is_initialized)
 				&& atomic_read(&is_ssr))
@@ -2405,7 +2404,7 @@ static int ssr_notifier_cb(struct notifier_block *this,
 			pr_info("IPA AFTER_POWERUP handling is complete\n");
 			return NOTIFY_DONE;
 		}
-		if (code == SUBSYS_BEFORE_POWERUP) {
+		if (code == QCOM_SSR_BEFORE_POWERUP) {
 			pr_info("IPA received MPSS BEFORE_POWERUP\n");
 			if (atomic_read(&is_ssr))
 				/* clean up cached QMI msg/handlers */
@@ -3200,7 +3199,7 @@ static int __init ipa_wwan_init(void)
 	ipa_qmi_init();
 
 	/* Register for Modem SSR */
-	subsys_notify_handle = subsys_notif_register_notifier(SUBSYS_MODEM,
+	subsys_notify_handle = qcom_register_ssr_notifier("mpss",
 						&ssr_notifier);
 	if (!IS_ERR(subsys_notify_handle))
 		return platform_driver_register(&rmnet_ipa_driver);
@@ -3215,12 +3214,12 @@ static void __exit ipa_wwan_cleanup(void)
 	ipa_qmi_cleanup();
 	mutex_destroy(&ipa_to_apps_pipe_handle_guard);
 	mutex_destroy(&add_mux_channel_lock);
-	ret = subsys_notif_unregister_notifier(subsys_notify_handle,
+	ret = qcom_unregister_ssr_notifier(subsys_notify_handle,
 					&ssr_notifier);
 	if (ret)
 		IPAWANERR(
 		"Error subsys_notif_unregister_notifier system %s, ret=%d\n",
-		SUBSYS_MODEM, ret);
+		"mpss", ret);
 	platform_driver_unregister(&rmnet_ipa_driver);
 }
 
