@@ -58,6 +58,11 @@
 #define NAPI_WEIGHT 60
 #define IPA_WWAN_CONS_DESC_FIFO_SZ 1024
 
+static int handle_ingress_format(struct net_device *dev,
+			struct rmnet_ioctl_extended_s *in);
+static void apps_ipa_tx_complete_notify(void *priv,
+		enum ipa_dp_evt_type evt,
+		unsigned long data);
 static struct net_device *ipa_netdevs[IPA_WWAN_DEVICE_COUNT];
 static struct ipa_sys_connect_params apps_to_ipa_ep_cfg, ipa_to_apps_ep_cfg;
 static u32 qmap_hdr_hdl, dflt_v4_wan_rt_hdl, dflt_v6_wan_rt_hdl;
@@ -985,14 +990,134 @@ static int __ipa_wwan_open(struct net_device *dev)
  * 0: success
  * -ENODEV: Error while opening logical channel on A2 MUX driver
  */
+static bool rmnet_inited = false;
 static int ipa_wwan_open(struct net_device *dev)
 {
 	int rc = 0;
+	int mru = 1000, epid = 1, mux_index, len;
+	const char vchannel_name[IFNAMSIZ] = "rmnet_data0";
+	struct rmnet_ioctl_extended_s extend_ioctl_data;
+	int mux_id = 1;
+
+	extend_ioctl_data.u.data=0xff;
 
 	IPAWANDBG("[%s] wwan_open()\n", dev->name);
 	rc = __ipa_wwan_open(dev);
 	if (rc == 0)
 		netif_start_queue(dev);
+
+	if (rc == 0 && !rmnet_inited) {
+		int rc;
+
+		mux_index = find_mux_channel_index(mux_id);
+		if (mux_index < MAX_NUM_OF_MUX_CHANNEL) {
+			IPAWANDBG("already setup mux(%d)\n", mux_id);
+			return rc;
+		}
+		mutex_lock(&add_mux_channel_lock);
+		if (rmnet_index >= MAX_NUM_OF_MUX_CHANNEL) {
+			IPAWANERR("Exceed mux_channel limit(%d)\n",
+					rmnet_index);
+			mutex_unlock(&add_mux_channel_lock);
+			return -EFAULT;
+		}
+		IPAWANDBG("ADD_MUX_CHANNEL(%d, name: %s)\n",
+				mux_id, vchannel_name);
+		/* cache the mux name and id */
+		mux_channel[rmnet_index].mux_id = mux_id;
+		memcpy(mux_channel[rmnet_index].vchannel_name,
+				vchannel_name,
+				sizeof(mux_channel[rmnet_index].vchannel_name));
+		mux_channel[rmnet_index].vchannel_name[
+			IFNAMSIZ - 1] = '\0';
+
+		IPAWANDBG("cashe device[%s:%d] in IPA_wan[%d]\n",
+				mux_channel[rmnet_index].vchannel_name,
+				mux_channel[rmnet_index].mux_id,
+				rmnet_index);
+		/* check if UL filter rules coming*/
+		if (num_q6_rule != 0) {
+			IPAWANERR("dev(%s) register to IPA\n",
+					vchannel_name);
+			rc = wwan_register_to_ipa(rmnet_index);
+			if (rc < 0) {
+				IPAWANERR("device %s reg IPA failed\n",
+						vchannel_name);
+				mutex_unlock(&add_mux_channel_lock);
+				return -ENODEV;
+			}
+			mux_channel[rmnet_index].mux_channel_set = true;
+			mux_channel[rmnet_index].ul_flt_reg = true;
+		} else {
+			IPAWANDBG("dev(%s) haven't registered to IPA\n",
+					vchannel_name);
+			mux_channel[rmnet_index].mux_channel_set = true;
+			mux_channel[rmnet_index].ul_flt_reg = false;
+		}
+		rmnet_index++;
+		mutex_unlock(&add_mux_channel_lock);
+
+		IPAWANDBG("get RMNET_IOCTL_SET_EGRESS_DATA_FORMAT\n");
+		if (1) {
+			apps_to_ipa_ep_cfg.ipa_ep_cfg.hdr.hdr_len = 8;
+			apps_to_ipa_ep_cfg.ipa_ep_cfg.cfg.cs_offload_en =
+					IPA_ENABLE_CS_OFFLOAD_UL;
+			apps_to_ipa_ep_cfg.ipa_ep_cfg.cfg.cs_metadata_hdr_offset = 1;
+		} else {
+			apps_to_ipa_ep_cfg.ipa_ep_cfg.hdr.hdr_len = 4;
+		}
+		if (1)
+			apps_to_ipa_ep_cfg.ipa_ep_cfg.aggr.aggr_en =
+				IPA_ENABLE_AGGR;
+		else
+			apps_to_ipa_ep_cfg.ipa_ep_cfg.aggr.aggr_en =
+				IPA_BYPASS_AGGR;
+		apps_to_ipa_ep_cfg.ipa_ep_cfg.hdr.hdr_ofst_metadata_valid = 1;
+
+		/* modem want offset at 0! */
+		apps_to_ipa_ep_cfg.ipa_ep_cfg.hdr.hdr_ofst_metadata = 0;
+		apps_to_ipa_ep_cfg.ipa_ep_cfg.mode.dst =
+				IPA_CLIENT_APPS_LAN_WAN_PROD;
+		apps_to_ipa_ep_cfg.ipa_ep_cfg.mode.mode = IPA_BASIC;
+
+		apps_to_ipa_ep_cfg.client =
+			IPA_CLIENT_APPS_LAN_WAN_PROD;
+		apps_to_ipa_ep_cfg.notify =
+			apps_ipa_tx_complete_notify;
+		apps_to_ipa_ep_cfg.desc_fifo_sz =
+		IPA_SYS_TX_DATA_DESC_FIFO_SZ;
+		apps_to_ipa_ep_cfg.priv = dev;
+
+		rc = ipa2_setup_sys_pipe(&apps_to_ipa_ep_cfg,
+			&apps_to_ipa_hdl);
+		if (rc)
+			IPAWANERR("failed to config egress endpoint\n");
+
+		if (num_q6_rule != 0) {
+			/* already got Q6 UL filter rules*/
+			if (ipa_qmi_ctx &&
+				!ipa_qmi_ctx->modem_cfg_emb_pipe_flt) {
+				/* protect num_q6_rule */
+				mutex_lock(&add_mux_channel_lock);
+				rc = wwan_add_ul_flt_rule_to_ipa();
+				mutex_unlock(&add_mux_channel_lock);
+			} else
+				rc = 0;
+			egress_set = true;
+			if (rc)
+				IPAWANERR("install UL rules failed\n");
+			else
+				a7_ul_flt_set = true;
+		} else {
+			/* wait Q6 UL filter rules*/
+			egress_set = true;
+			IPAWANDBG("no UL-rules, egress_set(%d)\n",
+				egress_set);
+		}
+		rc = handle_ingress_format(dev, &extend_ioctl_data);
+		rmnet_inited = true;
+	}
+
 	return rc;
 }
 
