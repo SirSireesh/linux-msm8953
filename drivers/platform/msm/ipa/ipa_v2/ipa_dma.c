@@ -845,7 +845,7 @@ static ssize_t ipa_dma_debugfs_reset_statistics(struct file *file,
 	if (sizeof(dbg_buff) < count + 1)
 		return -EFAULT;
 
-	missing = copy_from_user(dbg_buff, ubuf, count);
+	/*missing = copy_from_user(dbg_buff, ubuf, count);
 	if (missing)
 		return -EFAULT;
 
@@ -863,8 +863,8 @@ static ssize_t ipa_dma_debugfs_reset_statistics(struct file *file,
 	default:
 		IPADMA_ERR("invalid argument: To reset statistics echo 0\n");
 		break;
-	}
-	return count;
+	}*/
+	return -EFAULT;
 }
 
 static const struct file_operations ipadma_stats_ops = {

@@ -2283,6 +2283,7 @@ int _ipa_init_sram_v2_5(void)
 static inline void ipa_sram_set_canary(void __iomem *sram_mmio, int offset)
 {
 	/* Set 4 bytes of CANARY before the offset */
+	printk("ipa: setting canary at 0x%x + 0x%x\n", sram_mmio, offset);
 	iowrite32(IPA_MEM_CANARY_VAL, sram_mmio + (offset - 4));
 }
 
