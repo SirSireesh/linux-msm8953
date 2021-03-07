@@ -72,7 +72,6 @@ int ipa_mem_setup(struct ipa *ipa)
 		 * modem header memory. There is no AP_HEADER either, but since we
 		 * only care about its size, and not region, its fine.
 		 */
-		pr_info("ipa: prepping mem dma commit\n");
 		trans = ipa_cmd_trans_alloc(ipa, 4);
 		if (!trans) {
 			dev_err(&ipa->pdev->dev, "no transaction for memory setup\n");
