@@ -477,21 +477,19 @@ static void ipa_v2_table_init_add(struct ipa_trans *trans, bool filter,
 	struct ipa *ipa = trans->transport->ipa;
 	dma_addr_t addr;
 	u16 count;
-	u16 size;
 
 	/* The number of filtering endpoints determines number of entries
 	 * in the filter table. The size of the route table region determines
 	 * the number of entries it has.
          */
         if (filter)
-                count = hweight32(ipa->filter_map);
+		count = hweight32(ipa->filter_map);
 	else
 		count = mem->size / IPA_V2_TABLE_ENTRY_SIZE;
 
-	size = count * IPA_V2_TABLE_ENTRY_SIZE;
 	addr = ipa_table_addr(ipa, filter, count);
 
-	ipa_v2_cmd_table_init_add(trans, opcode, size, mem->offset, addr, ipv4);
+	ipa_v2_cmd_table_init_add(trans, opcode, mem->size, mem->offset, addr, ipv4);
 }
 
 static void ipa_v3_table_init_add(struct ipa_trans *trans, bool filter,
@@ -783,7 +781,7 @@ int ipa_v2_table_init(struct ipa *ipa)
 	*virt++ = cpu_to_le32(0xfffff << 1) | 0x1;
 
 	/* All the rest contain the DMA address of the zero rule */
-	le_addr = cpu_to_le32(ipa->zero_addr);
+	le_addr = cpu_to_le32(addr);
 	while (count--)
 		*virt++ = le_addr;
 
