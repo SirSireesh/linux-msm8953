@@ -71,10 +71,16 @@ struct bam_async_desc {
 
 	struct bam_desc_hw *curr_desc;
 
+	/* Some drivers need to know the size of the rx transaction. For those
+	 * drivers, we write the final rx length once the transaction completes
+	 */
+	unsigned *rx_length;
+
 	/* list node for the desc in the bam_chan list of descriptors */
 	struct list_head desc_node;
 	enum dma_transfer_direction dir;
 	size_t length;
+	size_t pos;
 	struct bam_desc_hw desc[];
 };
 
@@ -378,6 +384,11 @@ static inline struct bam_chan *to_bam_chan(struct dma_chan *common)
 	return container_of(common, struct bam_chan, vc.chan);
 }
 
+static inline struct bam_async_desc *to_bam_desc(struct dma_async_tx_descriptor *desc)
+{
+	return container_of(desc, struct bam_async_desc, vd.tx);
+}
+
 struct bam_device {
 	void __iomem *regs;
 	struct device *dev;
@@ -607,6 +618,23 @@ static int bam_slave_config(struct dma_chan *chan,
 	return 0;
 }
 
+static int bam_attach_metadata(struct dma_async_tx_descriptor *desc, void *data,
+			       size_t len)
+{
+	struct bam_async_desc *async_desc = to_bam_desc(desc);
+
+	if (!data)
+		return -EINVAL;
+
+	async_desc->rx_length = data;
+
+	return 0;
+}
+
+static struct dma_descriptor_metadata_ops metadata_ops = {
+	.attach = bam_attach_metadata,
+};
+
 /**
  * bam_prep_slave_sg - Prep slave sg transaction
  *
@@ -685,6 +713,8 @@ static struct dma_async_tx_descriptor *bam_prep_slave_sg(struct dma_chan *chan,
 			desc++;
 		} while (remainder > 0);
 	}
+
+	async_desc->vd.tx.metadata_ops = &metadata_ops;
 
 	return vchan_tx_prep(&bchan->vc, &async_desc->vd, flags);
 }
@@ -791,6 +821,20 @@ static int bam_resume(struct dma_chan *chan)
 	return 0;
 }
 
+static unsigned bam_get_rx_length(struct bam_async_desc *async_desc,
+				struct bam_desc_hw *fifo)
+{
+	unsigned len = 0, i;
+
+	for (i = 0; i < async_desc->xfer_len; ++i) {
+		unsigned pos = (i + async_desc->pos) % MAX_DESCRIPTORS;
+
+		len += fifo[pos].size;
+	}
+
+	return len;
+}
+
 /**
  * process_channel_irqs - processes the channel interrupts
  * @bdev: bam controller
@@ -812,6 +856,8 @@ static u32 process_channel_irqs(struct bam_device *bdev)
 
 	for (i = 0; i < bdev->num_channels; i++) {
 		struct bam_chan *bchan = &bdev->channels[i];
+		struct bam_desc_hw *fifo = PTR_ALIGN(bchan->fifo_virt,
+					sizeof(struct bam_desc_hw));
 
 		if (!(srcs & BIT(i)))
 			continue;
@@ -853,6 +899,9 @@ static u32 process_channel_irqs(struct bam_device *bdev)
 			 * it gets restarted by the tasklet
 			 */
 			if (!async_desc->num_desc) {
+				/* calculate length of transaction if requested */
+				if (async_desc->rx_length)
+					*async_desc->rx_length = bam_get_rx_length(async_desc, fifo);
 				vchan_cookie_complete(&async_desc->vd);
 			} else {
 				list_add(&async_desc->vd.node,
@@ -881,6 +930,7 @@ static irqreturn_t bam_dma_irq(int irq, void *data)
 	int ret;
 
 	srcs |= process_channel_irqs(bdev);
+
 
 	/* kick off tasklet to start next dma transfer */
 	if (srcs & P_IRQ)
@@ -1066,6 +1116,8 @@ static void bam_start_dma(struct bam_chan *bchan)
 			       async_desc->xfer_len *
 			       sizeof(struct bam_desc_hw));
 		}
+
+		async_desc->pos = bchan->tail;
 
 		bchan->tail += async_desc->xfer_len;
 		bchan->tail %= MAX_DESCRIPTORS;
@@ -1353,6 +1405,7 @@ static int bam_dma_probe(struct platform_device *pdev)
 	bdev->common.residue_granularity = DMA_RESIDUE_GRANULARITY_SEGMENT;
 	bdev->common.src_addr_widths = DMA_SLAVE_BUSWIDTH_4_BYTES;
 	bdev->common.dst_addr_widths = DMA_SLAVE_BUSWIDTH_4_BYTES;
+	bdev->common.desc_metadata_modes = DESC_METADATA_CLIENT;
 	bdev->common.device_alloc_chan_resources = bam_alloc_chan;
 	bdev->common.device_free_chan_resources = bam_free_chan;
 	bdev->common.device_prep_slave_sg = bam_prep_slave_sg;
