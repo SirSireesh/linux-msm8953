@@ -86,21 +86,10 @@ struct ipa_trans *bam_channel_trans_alloc(struct bam *bam, u32 channel_id,
 void bam_trans_callback(void *arg)
 {
 	struct ipa_trans *trans = arg;
-	pr_info("ipa: in cb\n");
 	/* If the entire SGL was mapped when added, unmap it now */
 	if (trans->direction != DMA_NONE)
 		dma_unmap_sg(trans->transport->dev, trans->sgl, trans->used,
 				trans->direction);
-
-	/* FIXME
-	 * On downstream, the length of the DMA is got from the BAM HW descriptor
-	 * On mainline, this is not yet supported (the BAM driver  needs a
-	 * dma_metadata_client implementation. Until I implement that,
-	 * I'm hardcoding 8128 here, which is the size of the buffer we share with
-	 * the IPA hardware for each packet. This could mean potentially invalid
-	 * packets would be parsed and created, so this should be fixed ASAP
-	 */
-	trans->len = 8128;
 
 	ipa_gsi_trans_complete(trans);
 
@@ -140,15 +129,12 @@ void __bam_trans_commit(struct ipa_trans *trans)
 			opcode = info++->opcode;
 
 		if (opcode != IPA_CMD_NONE) {
-			pr_info("ipa: prepping imm cmd\n");
 			len = opcode;
 			dma_flags |= DMA_PREP_IMM_CMD;
 		}
 
-		if (last_tre) {
-			pr_info("ipa: req irq\n");
+		if (last_tre)
 			dma_flags |= DMA_PREP_INTERRUPT;
-		}
 
 		desc = dmaengine_prep_slave_single(priv->chan, addr, len,
 				direction, dma_flags);
@@ -162,6 +148,9 @@ void __bam_trans_commit(struct ipa_trans *trans)
 
 		if (last_tre)
 			trans->cookie = desc->cookie;
+
+		if (direction == DMA_DEV_TO_MEM)
+			dmaengine_desc_attach_metadata(desc, &trans->len, sizeof(trans->len));
 	}
 
 	if (channel->toward_ipa) {
